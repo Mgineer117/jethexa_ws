@@ -39,8 +39,8 @@ Finally, create the workspace directory structure, build the workspace, and sour
 
 ```bash
 # Create the workspace directory structure
-mkdir -p ~/jethexa/src
-cd ~/jethexa
+mkdir -p ~/jethexa_ws/src
+cd ~/jethexa_ws
 
 # Initialize and build the workspace
 catkin_make
