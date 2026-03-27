@@ -48,7 +48,3 @@ catkin_make
 # Source the setup file to apply the workspace overlay
 source devel/setup.bash
 ```
-
----
-
-*Would you like me to add a section to this README explaining how to run the `debug_joints_relative.py` script we created earlier?*
