@@ -29,6 +29,10 @@ Connect the PC to the robot's hotspot and export the network variables. Identify
 export ROS_MASTER_URI=http://192.168.149.1:11311
 export ROS_IP=<your_pc_ip>
 ```
+where your pc ip can be known using 
+```
+hostname -I
+```
 
 ---
 
