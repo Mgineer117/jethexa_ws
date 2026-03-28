@@ -1,69 +1,64 @@
-#!/usr/bin/env python3
 import rospy
 from jethexa_controller_interfaces.msg import JointCommand
 
 
 class JetHexaRelativeDebugger:
     def __init__(self):
+        # Initialize node - anonymous=True allows multiple runs without naming conflicts
         rospy.init_node("jethexa_relative_debugger", anonymous=True)
 
-        # Publisher for RELATIVE joint commands
-        self.joint_pub = rospy.Publisher(
-            "/jethexa_controller/joint_relative", JointCommand, queue_size=1
-        )
+        # UPDATED TOPIC: Matches the output from your 'rostopic list'
+        self.topic_name = "/jethexa_controller/set_joints_relative"
 
-        rospy.loginfo("Waiting for joint_relative publisher to connect...")
-        rospy.sleep(2.0)  # Give ROS time to register the publisher
+        self.joint_pub = rospy.Publisher(self.topic_name, JointCommand, queue_size=1)
+
+        rospy.loginfo(f"Connecting to {self.topic_name}...")
+        # Essential for wireless: Give the Master time to link the PC and Robot
+        rospy.sleep(1.5)
 
     def send_relative_command(self, joint_idx, delta_value, duration=0.5):
         """Builds and sends a relative JointCommand for a single joint."""
         msg = JointCommand()
 
-        # Initialize an array of 18 zeros.
-        # In relative mode, 0.0 means "don't move this joint".
+        # Create the 18-element vector required by the JetHexa controller
         target_array = [0.0] * 18
 
-        # Set the specific joint to the delta value (+0.1 or -0.1)
-        target_array[joint_idx] = delta_value
+        # Guard against index errors
+        if 0 <= joint_idx < 18:
+            target_array[joint_idx] = float(delta_value)
+        else:
+            rospy.logerr(f"Invalid joint index: {joint_idx}")
+            return
 
         msg.target = target_array
-        msg.duration = duration
+        msg.duration = float(duration)
 
         self.joint_pub.publish(msg)
-        rospy.loginfo(f"  Joint [{joint_idx}] moving by {delta_value:+.2f} rad")
+        rospy.loginfo(f"Moving Joint [{joint_idx:02d}] by {delta_value:+.2f} rad")
 
     def run_debug_sequence(self, displacement=0.1, duration=0.5):
         """Iterates through all 18 joints, twitching them + then -."""
-        rospy.loginfo(
-            f"Starting Relative Debug Sequence. Movement: +/-{displacement} rad"
-        )
+        rospy.loginfo(f"Starting Sequence. Amplitude: +/-{displacement} rad")
 
         for i in range(18):
             if rospy.is_shutdown():
-                rospy.logwarn("Sequence interrupted by user.")
                 break
 
-            rospy.loginfo(f"--- Testing Joint [{i}] ---")
-
-            # 1. Move by +displacement
+            # 1. Perturb positive
             self.send_relative_command(i, displacement, duration)
-            rospy.sleep(duration + 0.2)  # Sleep slightly longer to ensure completion
+            rospy.sleep(duration + 0.1)
 
-            # 2. Move by -displacement (reversing the previous move to return to start)
+            # 2. Return to neutral (negative perturbation)
             self.send_relative_command(i, -displacement, duration)
-            rospy.sleep(duration + 0.2)
+            rospy.sleep(duration + 0.1)
 
-            rospy.sleep(0.1)  # Brief pause before moving to the next joint
-
-        rospy.loginfo(
-            "Debug sequence complete. All joints returned to starting positions."
-        )
+        rospy.loginfo("Debug sequence complete.")
 
 
 if __name__ == "__main__":
     try:
+        # 0.1 rad is about 5.7 degrees - safe for testing
         debugger = JetHexaRelativeDebugger()
-        # Using 0.1 rad (~5.7 degrees) and 0.5s duration
-        debugger.run_debug_sequence(displacement=0.1, duration=0.5)
+        debugger.run_debug_sequence(displacement=0.3, duration=0.4)
     except rospy.ROSInterruptException:
         pass

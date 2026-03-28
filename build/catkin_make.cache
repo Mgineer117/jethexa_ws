@@ -1,2 +1,2 @@
-
--DCATKIN_DEVEL_PREFIX=/home/minjae/jethexa/devel -DCMAKE_INSTALL_PREFIX=/home/minjae/jethexa/install -G Unix Makefiles
+jethexa_controller_interfaces
+-DCATKIN_DEVEL_PREFIX=/home/minjae/jethexa_ws/devel -DCMAKE_INSTALL_PREFIX=/home/minjae/jethexa_ws/install -G Unix Makefiles

@@ -270,7 +270,7 @@ if __name__ == '__main__':
 
         if not args.local:
             # environment at generation time
-            CMAKE_PREFIX_PATH = r'/home/minjae/miniconda3/envs/jethexa;/home/minjae/miniconda3/envs/jethexa/x86_64-conda-linux-gnu/sysroot/usr'.split(';')
+            CMAKE_PREFIX_PATH = r'/home/minjae/jethexa_ws/devel;/home/minjae/miniconda3/envs/jethexa;/home/minjae/miniconda3/envs/jethexa/x86_64-conda-linux-gnu/sysroot/usr'.split(';')
         else:
             # don't consider any other prefix path than this one
             CMAKE_PREFIX_PATH = []

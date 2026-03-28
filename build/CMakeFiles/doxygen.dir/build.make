@@ -53,10 +53,10 @@ RM = /home/minjae/miniconda3/envs/jethexa/bin/cmake -E rm -f
 EQUALS = =
 
 # The top-level source directory on which CMake was run.
-CMAKE_SOURCE_DIR = /home/minjae/jethexa/src
+CMAKE_SOURCE_DIR = /home/minjae/jethexa_ws/src
 
 # The top-level build directory on which CMake was run.
-CMAKE_BINARY_DIR = /home/minjae/jethexa/build
+CMAKE_BINARY_DIR = /home/minjae/jethexa_ws/build
 
 # Utility rule file for doxygen.
 
@@ -78,6 +78,6 @@ CMakeFiles/doxygen.dir/clean:
 .PHONY : CMakeFiles/doxygen.dir/clean
 
 CMakeFiles/doxygen.dir/depend:
-	cd /home/minjae/jethexa/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/minjae/jethexa/src /home/minjae/jethexa/src /home/minjae/jethexa/build /home/minjae/jethexa/build /home/minjae/jethexa/build/CMakeFiles/doxygen.dir/DependInfo.cmake --color=$(COLOR)
+	cd /home/minjae/jethexa_ws/build && $(CMAKE_COMMAND) -E cmake_depends "Unix Makefiles" /home/minjae/jethexa_ws/src /home/minjae/jethexa_ws/src /home/minjae/jethexa_ws/build /home/minjae/jethexa_ws/build /home/minjae/jethexa_ws/build/CMakeFiles/doxygen.dir/DependInfo.cmake --color=$(COLOR)
 .PHONY : CMakeFiles/doxygen.dir/depend
 

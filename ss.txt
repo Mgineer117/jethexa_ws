@@ -1,0 +1,4 @@
+# mirror command
+cd ~/jethexa_ws/src
+# Pulling only the interfaces package from the robot
+scp -r hiwonder@192.168.149.1:~/jethexa/src/jethexa_controller/jethexa_controller_interfaces .

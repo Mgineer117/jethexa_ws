@@ -1,0 +1,8 @@
+prefix=/home/minjae/jethexa_ws/devel
+
+Name: jethexa_controller_interfaces
+Description: Description of jethexa_controller_interfaces
+Version: 0.0.0
+Cflags: -I/home/minjae/jethexa_ws/devel/include
+Libs: -L${prefix}/lib 
+Requires: geometry_msgs rospy std_msgs std_srvs message_runtime
