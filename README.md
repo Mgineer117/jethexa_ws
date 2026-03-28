@@ -16,9 +16,9 @@ While this configuration is advantageous for high-level control — where the sy
 
 ### 1.1 PC Setup
 
-The centralized PC acts as the high-level controller. Clone this repository to get started:
+The centralized PC acts as the high-level controller. Clone this repository to the *home directory* to get started:
 ```bash
-git clone https://github.com/<your-repo>/jethexa_ws.git
+git clone https://github.com/Mgineer117/jethexa_ws
 cd jethexa_ws
 ```
 
