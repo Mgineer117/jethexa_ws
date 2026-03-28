@@ -14,7 +14,25 @@ While this configuration is advantageous for high-level control — where the sy
 
 ## 1. Setup
 
-### 1.1 Robot Setup
+### 1.1 PC Setup
+
+The centralized PC acts as the high-level controller. Clone this repository to get started:
+```bash
+git clone https://github.com/<your-repo>/jethexa_ws.git
+cd jethexa_ws
+```
+
+#### Communication Setup
+
+Connect the PC to the robot's hotspot and export the network variables. Identify your local IP via `hostname -I`, then run:
+```bash
+export ROS_MASTER_URI=http://192.168.149.1:11311
+export ROS_IP=<your_pc_ip>
+```
+
+---
+
+### 1.2 Robot Setup
 
 By default, the robot's operating system is configured to execute a `ros_bringup` script upon booting, which automatically initializes the core ROS nodes. However, this creates a significant network partition when attempting to bypass the manufacturer's recommended interfaces to command the robot from a centralized computer.
 
@@ -82,37 +100,6 @@ TARGET_DIR=~/jethexa/devel/lib/python2.7/dist-packages/jethexa_controller_interf
 # Copy the definition and update the package initialization
 cp $SOURCE_PY $TARGET_DIR/
 echo "from ._JointCommand import *" >> $TARGET_DIR/__init__.py
-```
-
----
-
-### 1.2 PC Setup
-
-The centralized PC acts as the high-level controller. To communicate with the robot, it must possess the "blueprints" for the JetHexa's custom ROS messages.
-
-#### Workspace Initialization
-
-On the PC, mirror the robot's interface definitions. If the `src` folder is empty, the PC will not recognize custom types like `JointCommand`. Execute the following to initialize the workspace and pull the definitions from the robot:
-```bash
-# 1. Create structure
-mkdir -p ~/jethexa_ws/src
-cd ~/jethexa_ws/src
-
-# 2. Pull message definitions from the robot (Remote Mirroring)
-scp -r hiwonder@192.168.149.1:~/jethexa/src/jethexa_controller/jethexa_controller_interfaces .
-
-# 3. Build the local 'blueprints' on the PC
-cd ~/jethexa_ws
-catkin_make -DCATKIN_WHITELIST_PACKAGES="jethexa_controller_interfaces"
-source devel/setup.bash
-```
-
-#### Communication Setup
-
-Connect the PC to the robot's hotspot and export the network variables. Identify your local IP via `hostname -I`, then run:
-```bash
-export ROS_MASTER_URI=http://192.168.149.1:11311
-export ROS_IP=<your_pc_ip>
 ```
 
 ---
