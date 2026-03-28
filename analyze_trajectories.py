@@ -68,4 +68,4 @@ def analyze_hexapod_trajectories(directory="."):
 
 
 if __name__ == "__main__":
-    analyze_hexapod_trajectories(".")
+    analyze_hexapod_trajectories("hexapod_data/")
