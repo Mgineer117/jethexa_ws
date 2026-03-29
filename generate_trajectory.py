@@ -9,6 +9,9 @@ import os
 import argparse
 
 
+from jethexa_controller_interfaces.msg import LegPosition
+
+
 class JetHexaDataCollector:
     def __init__(self, hz=25.0):
         rospy.init_node("jethexa_data_collector", anonymous=True)
@@ -38,8 +41,8 @@ class JetHexaDataCollector:
         self.cmd_pub = rospy.Publisher(
             "/jethexa_controller/cmd_vel", Twist, queue_size=1
         )
-        self.action_pub = rospy.Publisher(
-            "/jethexa_controller/run_actionset", String, queue_size=1
+        self.leg_pub = rospy.Publisher(
+            "/jethexa_controller/set_leg_relatively", LegPosition, queue_size=6
         )
 
         rospy.loginfo("Waiting for sensors...")
@@ -68,25 +71,22 @@ class JetHexaDataCollector:
         return state
 
     def stop_robot(self):
-        rospy.loginfo("Force-stopping Gait and Resetting...")
+        rospy.loginfo("Freezing legs at neutral relative position...")
 
-        # 1. Spam the Zero Velocity for longer (1 full second)
-        # This forces the gait engine to a halt even if there's lag
-        stop_twist = Twist()
-        for _ in range(10):
-            self.cmd_pub.publish(stop_twist)
-            rospy.sleep(0.1)
+        # Create the message with 0,0,0 coordinates
+        # Most JetHexa SDKs expect: leg_id (0 for all or 1-6), x, y, z
+        stop_msg = LegPosition()
+        stop_msg.x = 0.0
+        stop_msg.y = 0.0
+        stop_msg.z = 0.0
 
-        # 2. Use a proper String object (Standard ROS practice)
-        msg = String()
-        msg.data = "initial_pose"
+        # If the topic requires individual leg IDs, loop through them:
+        for leg_id in range(1, 7):
+            stop_msg.leg_id = leg_id
+            self.leg_pub.publish(stop_msg)
+            rospy.sleep(0.01)  # Small delay to prevent buffer overflow
 
-        # 3. Publish the reset command MULTIPLE times
-        for _ in range(10):
-            self.action_pub.publish(msg)
-            rospy.sleep(0.1)
-
-        rospy.loginfo("Robot should be locked now.")
+        rospy.loginfo("Legs locked.")
 
     def _run_collection(self, mode, duration, get_cmd_func):
         self.recorded_states = []
@@ -112,7 +112,7 @@ class JetHexaDataCollector:
         self.save_data(mode)
 
     def collect_sinusoidal_turning(self, duration=15.0):
-        s_vx, s_vy = np.random.uniform(0.05, 0.1), np.random.uniform(-0.1, 0.1)
+        s_vx, s_vy = np.random.uniform(0.01, 0.05), np.random.uniform(-0.1, 0.1)
         s_amp, s_freq = np.random.uniform(0.1, 0.5), np.random.uniform(0.1, 1.0)
 
         def cmd_logic(t):
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         "--mode", type=str, choices=["turning", "accel", "combined"], default="turning"
     )
     parser.add_argument("--duration", type=float, default=10.0)
-    parser.add_argument("--hz", type=float, default=25.0)
+    parser.add_argument("--hz", type=float, default=10.0)
     args = parser.parse_args()
 
     try:
