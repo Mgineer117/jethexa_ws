@@ -41,17 +41,8 @@ conda create -n jethexa python=3.9.18 -y
 conda activate jethexa
 
 # Install essential ROS desktop and necessary build tools
-conda install -c robostack-staging -c conda-forge \
-  ros-noetic-desktop \
-  ros-noetic-catkin \
-  catkin_tools \
-  cmake \
-  pkg-config \
-  make \
-  ninja \
-  compilers \
-  rospkg \
-  --override-channels -y
+conda install ros-noetic-ros-base ros-noetic-catkin catkin_tools -c robostack-staging -c conda-forge
+
 ```
 
 This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
