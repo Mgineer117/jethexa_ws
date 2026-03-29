@@ -62,8 +62,8 @@ If the first command returns the help manual for the ROS Master and the second p
 Finally, initialize and build the ROS workspace:
 ```bash
 # Create the workspace directory structure
-mkdir -p ~/jethexa/src
-cd ~/jethexa
+mkdir -p ~/jethexa_ws/src
+cd ~/jethexa_ws
 
 # Initialize and build the workspace
 catkin_make
