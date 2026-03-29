@@ -68,14 +68,25 @@ class JetHexaDataCollector:
         return state
 
     def stop_robot(self):
-        stop_twist = Twist()
-        for _ in range(5):
-            self.cmd_pub.publish(stop_twist)
-            rospy.sleep(0.05)
-        self.action_pub.publish("initial_pose")
-        rospy.sleep(1.0)
+        rospy.loginfo("Force-stopping Gait and Resetting...")
 
-    # --- Collection Methods (Simplified to call a single record loop) ---
+        # 1. Spam the Zero Velocity for longer (1 full second)
+        # This forces the gait engine to a halt even if there's lag
+        stop_twist = Twist()
+        for _ in range(10):
+            self.cmd_pub.publish(stop_twist)
+            rospy.sleep(0.1)
+
+        # 2. Use a proper String object (Standard ROS practice)
+        msg = String()
+        msg.data = "initial_pose"
+
+        # 3. Publish the reset command MULTIPLE times
+        for _ in range(10):
+            self.action_pub.publish(msg)
+            rospy.sleep(0.1)
+
+        rospy.loginfo("Robot should be locked now.")
 
     def _run_collection(self, mode, duration, get_cmd_func):
         self.recorded_states = []

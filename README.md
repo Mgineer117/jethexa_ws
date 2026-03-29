@@ -59,9 +59,6 @@ Finally, initialize and build the ROS workspace:
 ```bash
 # Initialize and build the workspace
 catkin_make -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-source devel/setup.bash
-source ~/.bashrc
-conda activate jethexa
 ```
 
 #### Communication Setup
@@ -70,6 +67,14 @@ Connect the PC to the robot's hotspot and export the network variables. Identify
 ```bash
 export ROS_MASTER_URI=http://192.168.149.1:11311
 export ROS_IP=<your_pc_ip>
+```
+
+Then run:
+
+```bash
+source ~/.bashrc
+conda activate jethexa
+source devel/setup.bash
 ```
 
 ---
