@@ -40,13 +40,18 @@ Once Conda is installed, create and activate the dedicated environment for the J
 conda create -n jethexa python=3.9.18 -y
 conda activate jethexa
 
-# Configure the channels specifically for this environment
-conda config --env --add channels conda-forge
-conda config --env --add channels robostack-staging
-conda config --env --remove channels defaults
-
 # Install essential ROS desktop and necessary build tools
-conda install robostack-staging ros-noetic-catkin ros-noetic-desktop compilers cmake pkg-config make ninja catkin_tools rospkg -y
+conda install -c robostack-staging -c conda-forge \
+  ros-noetic-desktop \
+  ros-noetic-catkin \
+  catkin_tools \
+  cmake \
+  pkg-config \
+  make \
+  ninja \
+  compilers \
+  rospkg \
+  --override-channels -y
 ```
 
 This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
