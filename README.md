@@ -60,6 +60,8 @@ Finally, initialize and build the ROS workspace:
 # Initialize and build the workspace
 catkin_make -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 source devel/setup.bash
+source ~/.bashrc
+conda activate jethexa
 ```
 
 #### Communication Setup
