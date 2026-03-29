@@ -46,7 +46,7 @@ conda config --env --add channels robostack-staging
 conda config --env --remove channels defaults
 
 # Install essential ROS desktop and necessary build tools
-conda install ros-noetic-desktop compilers cmake pkg-config make ninja catkin_tools rospkg -y
+conda install robostack-staging ros-noetic-catkin ros-noetic-desktop compilers cmake pkg-config make ninja catkin_tools rospkg -y
 ```
 
 This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
