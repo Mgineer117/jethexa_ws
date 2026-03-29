@@ -73,20 +73,10 @@ class JetHexaDataCollector:
     def stop_robot(self):
         rospy.loginfo("Freezing legs at neutral relative position...")
 
-        # Create the message with 0,0,0 coordinates
-        # Most JetHexa SDKs expect: leg_id (0 for all or 1-6), x, y, z
-        stop_msg = LegPosition()
-        stop_msg.x = 0.0
-        stop_msg.y = 0.0
-        stop_msg.z = 0.0
+        # 1. Kill velocity
+        self.cmd_pub.publish(Twist())
 
-        # If the topic requires individual leg IDs, loop through them:
-        for leg_id in range(1, 7):
-            stop_msg.leg_id = leg_id
-            self.leg_pub.publish(stop_msg)
-            rospy.sleep(0.01)  # Small delay to prevent buffer overflow
-
-        rospy.loginfo("Legs locked.")
+        rospy.loginfo("Robot stopped.")
 
     def _run_collection(self, mode, duration, get_cmd_func):
         self.recorded_states = []
