@@ -112,8 +112,8 @@ class JetHexaDataCollector:
         self.save_data(mode)
 
     def collect_sinusoidal_turning(self, duration=15.0):
-        s_vx, s_vy = np.random.uniform(0.01, 0.05), np.random.uniform(-0.1, 0.1)
-        s_amp, s_freq = np.random.uniform(0.1, 0.5), np.random.uniform(0.1, 1.0)
+        s_vx, s_vy = np.random.uniform(0.05, 0.1), 0.0
+        s_amp, s_freq = np.random.uniform(0.1, 0.3), np.random.uniform(0.1, 0.3)
 
         def cmd_logic(t):
             c = Twist()
@@ -124,9 +124,9 @@ class JetHexaDataCollector:
         self._run_collection("turning", duration, cmd_logic)
 
     def collect_smooth_acceleration(self, duration=15.0):
-        s_wz = np.random.uniform(-0.3, 0.3)
-        max_vx, max_vy = np.random.uniform(0.05, 0.10), np.random.uniform(0.02, 0.04)
-        s_freq = np.random.uniform(0.3, 1.0)
+        max_vx, max_vy = 0.1, 0.0
+        s_freq = np.random.uniform(0.1, 0.3)
+        s_wz = 0.0
 
         def cmd_logic(t):
             ramp = (np.sin(s_freq * t) + 1.0) / 2.0
@@ -136,22 +136,22 @@ class JetHexaDataCollector:
 
         self._run_collection("accel", duration, cmd_logic)
 
-    def collect_combined_stochastic(self, duration=20.0):
-        max_vx, max_vy, max_wz = (
-            np.random.uniform(0.04, 0.09),
-            np.random.uniform(0.02, 0.04),
-            np.random.uniform(0.3, 0.7),
-        )
-        f_linear, f_angular = np.random.uniform(0.4, 0.8), np.random.uniform(0.8, 1.5)
+    def collect_combined_stochastic(self, duration=15.0):
+        max_vx, max_vy = 0.1, 0.0
+        s_amp, s_freq = np.random.uniform(0.1, 0.3), np.random.uniform(0.1, 0.3)
 
         def cmd_logic(t):
-            l_ramp = (np.sin(f_linear * t) + 1.0) / 2.0
+            xy_ramp = (np.sin(s_freq * t) + 1.0) / 2.0
+            z_ramp = np.sin(s_freq * t)
             c = Twist()
-            c.linear.x, c.linear.y = max_vx * l_ramp, max_vy * l_ramp
-            c.angular.z = max_wz * np.sin(f_angular * t)
+            c.linear.x, c.linear.y, c.angular.z = (
+                max_vx * xy_ramp,
+                max_vy * xy_ramp,
+                s_amp * z_ramp,
+            )
             return c
 
-        self._run_collection("combined", duration, cmd_logic)
+        self._run_collection("accel", duration, cmd_logic)
 
     def save_data(self, mode):
         if not self.recorded_states:
@@ -167,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mode", type=str, choices=["turning", "accel", "combined"], default="turning"
     )
-    parser.add_argument("--duration", type=float, default=10.0)
+    parser.add_argument("--duration", type=float, default=30.0)
     parser.add_argument("--hz", type=float, default=10.0)
     args = parser.parse_args()
 
