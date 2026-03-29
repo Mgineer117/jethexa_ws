@@ -58,7 +58,7 @@ If the first command returns the help manual for the ROS Master and the second p
 Finally, initialize and build the ROS workspace:
 ```bash
 # Initialize and build the workspace
-catkin_make
+catkin_make -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 source devel/setup.bash
 ```
 
