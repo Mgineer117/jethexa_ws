@@ -16,10 +16,58 @@ While this configuration is advantageous for high-level control — where the sy
 
 ### 1.1 PC Setup
 
-The centralized PC acts as the high-level controller. Clone this repository to the **home directory** to get started:
+The centralized PC acts as the high-level controller. Clone this repository to get started:
 ```bash
-git clone https://github.com/Mgineer117/jethexa_ws
+git clone https://github.com/<your-repo>/jethexa_ws.git
 cd jethexa_ws
+```
+
+#### Installing Conda
+
+> Skip this section if you already have Conda installed on the PC.
+
+To install the Miniconda package manager, execute:
+```bash
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash ~/Miniconda3-latest-Linux-x86_64.sh
+source ~/.bashrc
+```
+
+#### Installing ROS
+
+Once Conda is installed, create and activate the dedicated environment for the JetHexa project, then configure the required channels for RoboStack before installing the dependencies:
+```bash
+conda create -n jethexa python=3.9.18 -y
+conda activate jethexa
+
+# Configure the channels specifically for this environment
+conda config --env --add channels conda-forge
+conda config --env --add channels robostack-staging
+conda config --env --remove channels defaults
+
+# Install essential ROS desktop and necessary build tools
+conda install ros-noetic-desktop compilers cmake pkg-config make ninja catkin_tools rospkg -y
+```
+
+This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
+
+To verify that the environment is correctly sourcing ROS and recognizes the Python interpreter, run:
+```bash
+roscore -h
+python3 -c "import rospy; print('ROS Python Bridge: Success')"
+```
+
+If the first command returns the help manual for the ROS Master and the second prints the success message, your PC is ready to interface with the robot.
+
+Finally, initialize and build the ROS workspace:
+```bash
+# Create the workspace directory structure
+mkdir -p ~/jethexa/src
+cd ~/jethexa
+
+# Initialize and build the workspace
+catkin_make
+source devel/setup.bash
 ```
 
 #### Communication Setup
