@@ -27,6 +27,7 @@ class JetHexaDataCollector:
 
         # Buffers for NPZ saving
         self.recorded_states = []
+        self.recorded_controls = []
 
         # Sensor State
         self.joint_pos = np.zeros(18)
@@ -63,12 +64,13 @@ class JetHexaDataCollector:
         - [4:22]  : Joint Positions (rad)
         - [22:40] : Joint Velocities (rad/s)
         """
-        joint_vel = (self.joint_pos - self.prev_joint_pos) / self.dt
+        control = self.joint_pos - self.prev_joint_pos
+        joint_vel = control / self.dt
         state = np.concatenate([self.base_quat, self.joint_pos, joint_vel])
 
         # Update prev_pos AFTER calculating state for this step
         self.prev_joint_pos = np.copy(self.joint_pos)
-        return state
+        return state, control
 
     def stop_robot(self):
         rospy.loginfo("Freezing legs at neutral relative position...")
@@ -94,7 +96,9 @@ class JetHexaDataCollector:
             # 2. Record the current state (Observations)
             # Note: We aren't recording 'actions' here because cmd_vel
             # doesn't expose the Cartesian foot deltas we need for set_leg_relatively.
-            self.recorded_states.append(self.get_current_state())
+            state, control = self.get_current_state()
+            self.recorded_states.append(state)
+            self.recorded_controls.append(control)
 
             self.rate.sleep()
 
@@ -144,12 +148,25 @@ class JetHexaDataCollector:
         self._run_collection("accel", duration, cmd_logic)
 
     def save_data(self, mode):
-        if not self.recorded_states:
+        # Check if either list is empty
+        if not self.recorded_states or not self.recorded_controls:
+            rospy.logwarn("No data to save. States or Controls are empty.")
             return
+
         ts = int(time.time())
-        filename = os.path.join(self.output_dir, f"{mode}_{ts}.npy")
-        np.save(filename, np.array(self.recorded_states))
-        rospy.loginfo(f"Saved {mode} state data: {len(self.recorded_states)} steps.")
+        # Note the change from .npy to .npz for multi-array archives
+        filename = os.path.join(self.output_dir, f"{mode}_{ts}.npz")
+
+        # Save both lists as named arrays inside the .npz file
+        np.savez(
+            filename,
+            states=np.array(self.recorded_states),
+            controls=np.array(self.recorded_controls),
+        )
+
+        rospy.loginfo(
+            f"Saved {mode} data -> States: {len(self.recorded_states)}, Controls: {len(self.recorded_controls)} steps."
+        )
 
 
 if __name__ == "__main__":
