@@ -1,6 +1,5 @@
 .catkin_workspace
 build/
 devel/
-hexapod_data/
 src/CMakeLists.txt
 *.pyc
