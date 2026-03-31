@@ -1,64 +1,93 @@
+#!/usr/bin/env python3
+import random
+
 import rospy
+
 from jethexa_controller_interfaces.msg import JointCommand
 
 
-class JetHexaRelativeDebugger:
+class JetHexaGroupNoiseInjector:
     def __init__(self):
         # Initialize node - anonymous=True allows multiple runs without naming conflicts
-        rospy.init_node("jethexa_relative_debugger", anonymous=True)
+        rospy.init_node("jethexa_group_noise_injector", anonymous=True)
 
-        # UPDATED TOPIC: Matches the output from your 'rostopic list'
+        self.gait_type = "tripod"  # For future expansion to other gaits
+
+        if self.gait_type == "tripod":
+            self.group_a = [0, 1, 2, 6, 7, 8, 12, 13, 14]
+            self.group_b = [3, 4, 5, 9, 10, 11, 15, 16, 17]
+        self.groups = [("Group A", self.group_a), ("Group B", self.group_b)]
+
         self.topic_name = "/jethexa_controller/set_joints_relative"
-
         self.joint_pub = rospy.Publisher(self.topic_name, JointCommand, queue_size=1)
 
         rospy.loginfo(f"Connecting to {self.topic_name}...")
         # Essential for wireless: Give the Master time to link the PC and Robot
         rospy.sleep(1.5)
 
-    def send_relative_command(self, joint_idx, delta_value, duration=0.5):
-        """Builds and sends a relative JointCommand for a single joint."""
+    def send_group_command(self, joint_indices, noise_values, duration=0.5):
+        """Builds and sends a relative JointCommand for a specific group of joints."""
         msg = JointCommand()
 
-        # Create the 18-element vector required by the JetHexa controller
+        # Create the 18-element vector of zeros
         target_array = [0.0] * 18
 
-        # Guard against index errors
-        if 0 <= joint_idx < 18:
-            target_array[joint_idx] = float(delta_value)
-        else:
-            rospy.logerr(f"Invalid joint index: {joint_idx}")
-            return
+        # Map the noise values to their specific joint indices
+        for idx, noise in zip(joint_indices, noise_values):
+            if 0 <= idx < 18:
+                target_array[idx] = float(noise)
+            else:
+                rospy.logerr(f"Invalid joint index: {idx}")
 
         msg.target = target_array
         msg.duration = float(duration)
 
         self.joint_pub.publish(msg)
-        rospy.loginfo(f"Moving Joint [{joint_idx:02d}] by {delta_value:+.2f} rad")
 
-    def run_debug_sequence(self, displacement=0.1, duration=0.5):
-        """Iterates through all 18 joints, twitching them + then -."""
-        rospy.loginfo(f"Starting Sequence. Amplitude: +/-{displacement} rad")
+    def run_noise_sequence(self, max_displacement=0.3, duration=0.5):
+        """Injects noise into Group A, neutralizes, then Group B."""
+        rospy.loginfo(
+            f"Starting Noise Sequence. Max Amplitude: +/-{max_displacement} rad"
+        )
 
-        for i in range(18):
+        # Define the joint indices for the two Tripod groups
+        # Group A: Leg 1 (0-2), Leg 3 (6-8), Leg 5 (12-14)
+
+        # Group B: Leg 2 (3-5), Leg 4 (9-11), Leg 6 (15-17)
+
+        for group_name, indices in self.groups:
             if rospy.is_shutdown():
                 break
 
-            # 1. Perturb positive
-            self.send_relative_command(i, displacement, duration)
+            rospy.loginfo(f"--- Injecting Noise into {group_name} ---")
+
+            # 1. Generate random noise vector for this specific group
+            noise_vector = [
+                random.uniform(-max_displacement, max_displacement) for _ in indices
+            ]
+
+            # Print a sample of the noise to the terminal for debugging
+            rospy.loginfo(
+                f"Noise applied: {[round(n, 2) for n in noise_vector[:3]]}..."
+            )
+
+            # 2. Perturb the group
+            self.send_group_command(indices, noise_vector, duration)
             rospy.sleep(duration + 0.1)
 
-            # 2. Return to neutral (negative perturbation)
-            self.send_relative_command(i, -displacement, duration)
+            # 3. Return to neutral (Exact negative of the noise applied)
+            rospy.loginfo(f"Reversing noise to return {group_name} to neutral...")
+            reverse_vector = [-n for n in noise_vector]
+            self.send_group_command(indices, reverse_vector, duration)
             rospy.sleep(duration + 0.1)
 
-        rospy.loginfo("Debug sequence complete.")
+        rospy.loginfo("Group noise sequence complete.")
 
 
 if __name__ == "__main__":
     try:
-        # 0.1 rad is about 5.7 degrees - safe for testing
-        debugger = JetHexaRelativeDebugger()
-        debugger.run_debug_sequence(displacement=0.3, duration=0.4)
+        # 0.3 rad is about 17 degrees - noticeable but safe
+        injector = JetHexaGroupNoiseInjector()
+        injector.run_noise_sequence(max_displacement=0.3, duration=0.4)
     except rospy.ROSInterruptException:
         pass

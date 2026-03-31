@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-import rospy
-import numpy as np
-from sensor_msgs.msg import JointState, Imu
-from geometry_msgs.msg import Twist
-from std_msgs.msg import String
-import time
-import os
 import argparse
+import os
+import time
 
+import numpy as np
+import rospy
+from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Imu, JointState
+from std_msgs.msg import String
 
-from jethexa_controller_interfaces.msg import LegPosition
+from jethexa_controller_interfaces.msg import JointCommand
 
 
 class JetHexaDataCollector:
@@ -42,16 +42,51 @@ class JetHexaDataCollector:
         self.cmd_pub = rospy.Publisher(
             "/jethexa_controller/cmd_vel", Twist, queue_size=1
         )
-        self.leg_pub = rospy.Publisher(
-            "/jethexa_controller/set_leg_relatively", LegPosition, queue_size=6
+        self.joint_pub = rospy.Publisher(
+            "/jethexa_controller/set_joints_raw",
+            JointCommand,
+            queue_size=1,
+            tcp_nodelay=True,
         )
+        self.action_pub = rospy.Publisher(
+            "/jethexa_controller/run_actionset", String, queue_size=1
+        )
+
+        self.init_joint_pos = [
+            0.17120142291266816,
+            0.7383813588273885,
+            -0.574647577430417,
+            0.0,
+            0.7435823754497041,
+            -0.5952505177281151,
+            -0.17120142291266816,
+            0.7383813588273885,
+            -0.574647577430417,
+            0.17120142291266838,
+            0.7383813588273884,
+            -0.5746475774304161,
+            0.0,
+            0.7435823754497041,
+            -0.5952505177281151,
+            -0.17120142291266838,
+            0.7383813588273884,
+            -0.5746475774304161,
+        ]
 
         rospy.loginfo("Waiting for sensors...")
         rospy.sleep(2.0)
         self.prev_joint_pos = np.copy(self.joint_pos)
 
+        # Add this to the end of your __init__
+        rospy.loginfo("Waking up gait engine...")
+        warmup_cmd = Twist()
+        for _ in range(3):
+            self.cmd_pub.publish(warmup_cmd)
+            rospy.sleep(1.0)
+        rospy.loginfo("Gait engine ready.")
+
     def joint_cb(self, msg):
-        self.joint_pos = np.array(msg.position)
+        self.joint_pos = np.array(msg.position)[:18]
 
     def imu_cb(self, msg):
         q = msg.orientation
@@ -73,12 +108,37 @@ class JetHexaDataCollector:
         return state, control
 
     def stop_robot(self):
-        rospy.loginfo("Freezing legs at neutral relative position...")
+        rospy.loginfo("Initiating hard stop and freeze sequence...")
 
-        # 1. Kill velocity
-        self.cmd_pub.publish(Twist())
+        # 1. Kill velocity (Spam it so the controller catches it)
+        stop_twist = Twist()
+        for _ in range(5):
+            self.cmd_pub.publish(stop_twist)
+            rospy.sleep(0.1)  # CRITICAL: Give the controller time to receive
 
-        rospy.loginfo("Robot stopped.")
+        # 2. Kill the Gait Engine / IMU Balance loop
+        # Sending this action forces the JetHexa out of the walking state machine
+        # so it stops fighting your raw joint commands.
+        reset_msg = String()
+        reset_msg.data = "initial_pose"
+        self.action_pub.publish(reset_msg)
+        rospy.sleep(1.0)  # Wait for the legs to lock
+
+        # 3. Publish your exact desired joint positions
+        rospy.loginfo("Applying specific neutral joint coordinates...")
+        msg_a = JointCommand()
+        msg_a.target = self.init_joint_pos
+        msg_a.duration = 1.0
+
+        for _ in range(3):
+            if rospy.is_shutdown():
+                break
+            self.joint_pub.publish(msg_a)
+            rospy.sleep(
+                0.5
+            )  # CRITICAL: Sleep inside the loop so messages aren't dropped!
+
+        rospy.loginfo("Robot successfully stopped and locked.")
 
     def _run_collection(self, mode, duration, get_cmd_func):
         self.recorded_states = []
@@ -107,12 +167,13 @@ class JetHexaDataCollector:
 
     def collect_sinusoidal_turning(self, duration=15.0):
         s_vx, s_vy = np.random.uniform(0.05, 0.1), 0.0
-        s_amp, s_freq = np.random.uniform(0.1, 0.3), np.random.uniform(0.1, 0.3)
+        s_amp, s_freq = np.random.uniform(0.1, 0.3), 1 / 30
 
         def cmd_logic(t):
             c = Twist()
             c.linear.x, c.linear.y = s_vx, s_vy
-            c.angular.z = s_amp * np.sin(s_freq * t)
+            c.angular.z = s_amp * np.cos(2 * np.pi * s_freq * t)
+            rospy.loginfo(f"Time: {t:.2f}, omega_z: {np.cos(2 * np.pi * s_freq * t)}")
             return c
 
         self._run_collection("turning", duration, cmd_logic)
