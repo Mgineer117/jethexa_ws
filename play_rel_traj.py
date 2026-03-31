@@ -17,6 +17,8 @@ import rospy
 
 from jethexa_controller_interfaces.msg import JointCommand
 
+from parameters import GROUP_A, GROUP_B, INIT_JOINT_POS, HZ
+
 
 class JetHexaTrajectoryPlayer:
     def __init__(self, directory="hexapod_data"):
@@ -25,31 +27,11 @@ class JetHexaTrajectoryPlayer:
         self.directory = directory
 
         self.groups = {
-            "Group A": [0, 1, 2, 6, 7, 8, 12, 13, 14],
-            "Group B": [3, 4, 5, 9, 10, 11, 15, 16, 17],
+            "Group A": GROUP_A,
+            "Group B": GROUP_B,
         }
 
-        self.init_joint_pos = [
-            0.17120142291266816,
-            0.7383813588273885,
-            -0.574647577430417,
-            0.0,
-            0.7435823754497041,
-            -0.5952505177281151,
-            -0.17120142291266816,
-            0.7383813588273885,
-            -0.574647577430417,
-            0.17120142291266838,
-            0.7383813588273884,
-            -0.5746475774304161,
-            0.0,
-            0.7435823754497041,
-            -0.5952505177281151,
-            -0.17120142291266838,
-            0.7383813588273884,
-            -0.5746475774304161,
-        ]
-
+        # Publishers
         self.joint_rel_pub = rospy.Publisher(
             "/jethexa_controller/set_joints_relative", JointCommand, queue_size=1
         )
@@ -60,34 +42,35 @@ class JetHexaTrajectoryPlayer:
             tcp_nodelay=True,
         )
 
-        rospy.sleep(1.5)
+        self.initiate_robot()
 
-        self.wake_up_with_current_state()
-
-    def wake_up_with_current_state(self, iterations=15):
+    def initiate_robot(self, iterations=10):
         """Forces the IK engine to engage without moving the physical legs."""
-        rospy.loginfo("Sending current state heartbeat...")
+        rospy.loginfo("[INFO]: Initializing robot...")
         msg = JointCommand()
-        msg.target = self.init_joint_pos
+        msg.target = INIT_JOINT_POS
         msg.duration = 0.1
 
         for _ in range(iterations):
             if rospy.is_shutdown():
                 break
             self.joint_abs_pub.publish(msg)
-            rospy.sleep(0.05)
-        rospy.loginfo("Controller warmed up and ready.")
+            rospy.sleep(0.1)
+        rospy.loginfo("[INFO]: Robot initialized.")
 
     def stop_robot(self):
         msg_a = JointCommand()
-        msg_a.target = self.init_joint_pos
+        msg_a.target = INIT_JOINT_POS
         msg_a.duration = 1.0
         for _ in range(5):
             if rospy.is_shutdown():
                 break
             self.joint_abs_pub.publish(msg_a)
 
-    def load_latest_data(self):
+    def load_latest_data(self, filename=None):
+        if filename:
+            return np.load(os.path.join(self.directory, filename))
+
         files = glob.glob(os.path.join(self.directory, "*.npz"))
         if not files:
             rospy.logerr(f"No .npz files found in: {self.directory}")
@@ -101,19 +84,16 @@ class JetHexaTrajectoryPlayer:
             return
 
         joint_controls = data["controls"]
-        total_steps = len(joint_controls) - 1
-
-        rospy.loginfo(f"Trajectory contains {total_steps} execution steps.")
+        total_steps = len(joint_controls)
 
         # In tripod mode, we do TWO movements per timestep (Group A, then Group B).
-        # We run the loop twice as fast so the overall time stays the same.
         rate = rospy.Rate(hz * 2.0)
-        step_duration = (1.0 / (hz * 2.0)) * 0.95
-
-        rospy.loginfo("Starting Tripod playback in 2 seconds...")
-        rospy.sleep(2.0)
+        step_duration = (1.0 / (hz * 2.0)) * 0.95  # add margin
 
         # Execution Loop
+        rospy.loginfo(
+            f"[INFO]: Collecting Trajectory with {total_steps} execution steps."
+        )
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
@@ -142,16 +122,16 @@ class JetHexaTrajectoryPlayer:
 
             if i % 10 == 0:
                 rospy.loginfo(
-                    f"Executing step {i}/{total_steps} ({(i/total_steps)*100:.1f}%)"
+                    f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete."
                 )
 
-        rospy.loginfo("Playback sequence complete.")
+        rospy.loginfo("[INFO]: Relative Tripod Playback complete.")
         self.stop_robot()
 
 
 if __name__ == "__main__":
     try:
         player = JetHexaTrajectoryPlayer(directory="hexapod_data")
-        player.play_trajectory(hz=10.0)
+        player.play_trajectory(hz=HZ)
     except rospy.ROSInterruptException:
         pass
