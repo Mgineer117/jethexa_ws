@@ -43,6 +43,8 @@ conda activate jethexa
 # Install essential ROS desktop and necessary build tools
 conda install ros-noetic-ros-base ros-noetic-catkin catkin_tools -c robostack-staging -c conda-forge
 
+pip install scipy qtm-rt
+
 ```
 
 This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
