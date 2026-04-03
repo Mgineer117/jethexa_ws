@@ -16,8 +16,7 @@ import numpy as np
 import rospy
 
 from jethexa_controller_interfaces.msg import JointCommand
-
-from parameters import GROUP_A, GROUP_B, INIT_JOINT_POS, HZ
+from parameters import GROUP_A, GROUP_B, HZ, INIT_JOINT_POS
 
 
 class JetHexaTrajectoryPlayer:
@@ -66,6 +65,7 @@ class JetHexaTrajectoryPlayer:
             if rospy.is_shutdown():
                 break
             self.joint_abs_pub.publish(msg_a)
+            rospy.sleep(0.1)
 
     def load_latest_data(self, filename=None):
         if filename:
@@ -92,7 +92,7 @@ class JetHexaTrajectoryPlayer:
 
         # Execution Loop
         rospy.loginfo(
-            f"[INFO]: Collecting Trajectory with {total_steps} execution steps."
+            f"[INFO]: Playing Trajectory with {total_steps} execution steps."  # BUG FIX: Changed Collecting to Playing
         )
         for i in range(total_steps):
             if rospy.is_shutdown():

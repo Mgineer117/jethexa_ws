@@ -3,12 +3,12 @@ import glob
 import os
 
 import numpy as np
-from parameters import GROUP_A, GROUP_B, HZ, INIT_JOINT_POS
 import rospy
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 from jethexa_controller_interfaces.msg import JointCommand
+from parameters import GROUP_A, GROUP_B, HZ, INIT_JOINT_POS
 
 
 class JetHexaAbsolutePlayer:
@@ -52,7 +52,8 @@ class JetHexaAbsolutePlayer:
         for _ in range(iterations):
             if rospy.is_shutdown():
                 break
-            self.joint_abs_pub.publish(msg)
+            # BUG FIX: joint_abs_pub changed to joint_pub
+            self.joint_pub.publish(msg)
             rospy.sleep(0.1)
         rospy.loginfo("[INFO]: Robot initialized.")
 
@@ -84,15 +85,13 @@ class JetHexaAbsolutePlayer:
         if data_archive is None:
             return
 
-        # Extract the 18 joint angles from the state vector
         """
-        40-dim State Vector:
+        24-dim State Vector (Updated):
         - [0:3]   : Position (x,y,z)
-        - [3:7]   : Quat (x,y,z,w)
-        - [7:25]  : Joint Positions (rad)
-        - [25:43] : Joint Velocities (rad/s)
+        - [3:6]   : Orientation (\theta, \phi, \psi)
+        - [6:24]  : Joint Positions (18 DOF)
         """
-        abs_joint_targets = data_archive["states"][:, 7:25]
+        abs_joint_targets = data_archive["states"][:, 6:24]
         total_steps = len(abs_joint_targets)
 
         # Run at 2x speed to accommodate split phases
@@ -103,9 +102,7 @@ class JetHexaAbsolutePlayer:
         last_commanded = self.current_joints.copy()
 
         # Execution Loop
-        rospy.loginfo(
-            f"[INFO]: Collecting Trajectory with {total_steps} execution steps."
-        )
+        rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
@@ -140,7 +137,6 @@ class JetHexaAbsolutePlayer:
                 )
 
         rospy.loginfo("[INFO]: Absolute Tripod Playback complete.")
-        self.stop_robot()
 
 
 if __name__ == "__main__":
