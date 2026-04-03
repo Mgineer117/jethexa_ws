@@ -2,3 +2,7 @@
 cd ~/jethexa_ws/src
 # Pulling only the interfaces package from the robot
 scp -r hiwonder@192.168.149.1:~/jethexa/src/jethexa_controller/jethexa_controller_interfaces .
+
+
+nmcli device wifi connect "HW-660AA95C" password "hiwonder" ifname wlx3c7895459159
+python3 ros1_qualysis.py --marker_deck_name jethexa

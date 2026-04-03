@@ -198,7 +198,7 @@ def main(args=None):
     p_args, unknown = parser.parse_known_args()
 
     # IP address of the motion capture system
-    ip_address = "YOUR_QUALISYS_IP_ADDRESS"
+    ip_address = "128.174.245.64"
     marker_deck_name = p_args.marker_deck_name
 
     # Initialize ROS 1 Node
