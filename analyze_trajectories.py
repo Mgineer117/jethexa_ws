@@ -5,16 +5,18 @@ JET-HEXA TRAJECTORY ANALYZER
 Functionality:
 1. Selects the most recently modified .npz file.
 2. Extracts the 'states' array from the archive.
-3. Parses the 40-dimensional state vector (QUAT FIRST):
-    - Indices [0:4]: Base Orientation (IMU Quaternions x, y, z, w)
-    - Indices [4:22]: Joint Positions (18 DOF)
-    - Indices [22:40]: Joint Velocities (Finite Difference)
+3. Parses the data according to the Data Collector format:
+    STATES (24-dim):
+    - Indices [0:3] : Base Position (x, y, z)
+    - Indices [3:6] : Base Orientation (roll, pitch, yaw)
+    - Indices [6:24]: Joint Positions (18 DOF)
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
-import os
 import glob
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 def analyze_hexapod_trajectories(directory="."):
@@ -28,47 +30,53 @@ def analyze_hexapod_trajectories(directory="."):
     latest_file = max(files, key=os.path.getmtime)
     print(f"--- Analyzing Latest Recording: {latest_file} ---")
 
-    # 2. Load the archive and extract the 'states' array
+    # 2. Load the archive and extract the arrays
     archive = np.load(latest_file)
 
-    # Verify the keys inside the archive (usually 'states' and 'controls')
+    # Verify the keys inside the archive
     print(f"Archive contains keys: {archive.files}")
 
     states_data = archive["states"]
 
+    # Optional: You can still load controls_data if you need to inspect it later
+    # controls_data = archive["controls"]
+
     timesteps = np.arange(states_data.shape[0]) / 10.0  # Assuming 10Hz recording
 
     # 3. Create a multi-plot figure
-    fig, axs = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+    fig, axs = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
     fig.suptitle(f"Trajectory Analysis: {os.path.basename(latest_file)}", fontsize=16)
 
-    # --- Plot 1: IMU Orientation (Indices 0:4) ---
-    labels = ["x", "y", "z", "w"]
-    for i in range(4):
+    # --- Plot 1: Base Position (Indices 0:3) ---
+    labels_pos = ["x", "y", "z"]
+    for i in range(3):
         axs[0].plot(
-            timesteps, states_data[:, i], label=f"Quat {labels[i]}", linewidth=2
+            timesteps, states_data[:, i], label=f"Pos {labels_pos[i]}", linewidth=2
         )
-    axs[0].set_ylabel("Quaternion Value")
-    axs[0].set_title("Torso Orientation (IMU Filtered)")
-    axs[0].legend(loc="upper right", ncol=4, fontsize="small")
+    axs[0].set_ylabel("Position (m)")
+    axs[0].set_title("Torso Position (From Qualisys)")
+    axs[0].legend(loc="upper right", ncol=3, fontsize="small")
     axs[0].grid(True, alpha=0.3)
 
-    # --- Plot 2: Joint Positions (Indices 4:22 - Showing first 6 joints) ---
-    # We plot index 4 through 9 (First 6 joints)
-    for i in range(4, 10):
-        axs[1].plot(timesteps, states_data[:, i], label=f"Joint {i-3}")
-    axs[1].set_ylabel("Position (rad)")
-    axs[1].set_title("Joint Positions (Legs 1-2)")
-    axs[1].legend(loc="upper right", ncol=3, fontsize="x-small")
+    # --- Plot 2: Base Orientation (Indices 3:6) ---
+    labels_ori = ["roll", "pitch", "yaw"]
+    for i in range(3):
+        axs[1].plot(
+            timesteps, states_data[:, i + 3], label=f"Ori {labels_ori[i]}", linewidth=2
+        )
+    axs[1].set_ylabel("Angle (rad)")
+    axs[1].set_title("Torso Orientation (From Qualisys/IMU)")
+    axs[1].legend(loc="upper right", ncol=3, fontsize="small")
     axs[1].grid(True, alpha=0.3)
 
-    # --- Plot 3: Joint Velocities (Indices 22:40 - Showing first 6 joints) ---
-    # We plot index 22 through 27 (First 6 velocities)
-    for i in range(22, 28):
-        axs[2].plot(timesteps, states_data[:, i], label=f"Vel {i-21}")
-    axs[2].set_ylabel("Velocity (rad/s)")
+    # --- Plot 3: All 18 Joint Positions (Indices 6:24) ---
+    for i in range(6, 24):
+        axs[2].plot(timesteps, states_data[:, i], label=f"Joint {i-5}")
+    axs[2].set_ylabel("Position (rad)")
     axs[2].set_xlabel("Time (seconds)")
-    axs[2].set_title("Joint Velocities (Finite Difference)")
+    axs[2].set_title("Joint Positions (All 18 DOF)")
+    # Expanded ncol to 6 so the 18 labels fit cleanly across the top
+    axs[2].legend(loc="upper right", ncol=6, fontsize="x-small")
     axs[2].grid(True, alpha=0.3)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
@@ -77,4 +85,5 @@ def analyze_hexapod_trajectories(directory="."):
 
 
 if __name__ == "__main__":
+    # Ensure this directory matches the output_dir in your collector
     analyze_hexapod_trajectories("hexapod_data")
