@@ -121,11 +121,15 @@ class JetHexaDataCollector:
 
             self.rate.sleep()
 
+            rospy.loginfo(
+                f"Elapsed: {elapsed:.2f}s, Steps: {len(self.recorded_states)}"
+            )
+
         self.stop_robot()
         self.save_data(mode)
 
     def collect_sinusoidal_turning(self, duration=30.0):
-        s_vx, s_vy = np.random.uniform(0.03, 0.08), 0.0
+        s_vx, s_vy = np.random.uniform(0.02, 0.05), 0.0
         s_amp, s_freq = np.random.uniform(0.01, 0.05), 1 / 30
 
         def cmd_logic(t):
@@ -138,7 +142,7 @@ class JetHexaDataCollector:
         self._run_collection("turning", duration, cmd_logic)
 
     def collect_smooth_acceleration(self, duration=30.0):
-        max_vx, max_vy = np.random.uniform(0.03, 0.08), 0.0
+        max_vx, max_vy = np.random.uniform(0.02, 0.05), 0.0
         s_wz, s_freq = 0.0, 1 / 30
 
         def cmd_logic(t):
@@ -150,8 +154,8 @@ class JetHexaDataCollector:
         self._run_collection("accel", duration, cmd_logic)
 
     def collect_combined_stochastic(self, duration=30.0):
-        max_vx, max_vy = np.random.uniform(0.03, 0.08), 0.0
-        s_amp, s_freq = np.random.uniform(0.03, 0.08), 1 / 30
+        max_vx, max_vy = np.random.uniform(0.02, 0.05), 0.0
+        s_amp, s_freq = np.random.uniform(0.02, 0.05), 1 / 30
 
         def cmd_logic(t):
             xy_ramp = (np.sin(2 * np.pi * s_freq * t) + 1.0) / 2.0
