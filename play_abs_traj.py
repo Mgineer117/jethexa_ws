@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+"""
+JET-HEXA ABSOLUTE TRAJECTORY PLAYBACK (SIMULTANEOUS 18-DOF MODE)
+----------------------------
+Functionality:
+1. Finds the most recent .npz/.npy data file.
+2. Extracts the 18-DOF absolute joint targets from the state vector.
+3. Publishes all 18 joint targets simultaneously to the robot.
+"""
+
 import glob
 import os
 
@@ -8,7 +17,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
 from jethexa_controller_interfaces.msg import JointCommand
-from parameters import GROUP_A, GROUP_B, HZ, INIT_JOINT_POS
+from parameters import HZ, INIT_JOINT_POS
 
 
 class JetHexaAbsolutePlayer:
@@ -16,13 +25,6 @@ class JetHexaAbsolutePlayer:
         rospy.init_node("jethexa_abs_player", anonymous=True)
 
         self.directory = directory
-
-        # Dictionary for Tripod Grouping
-        self.groups = {
-            "Group A": GROUP_A,
-            "Group B": GROUP_B,
-        }
-
         self.current_joints = None
 
         # Subscribers
@@ -52,7 +54,6 @@ class JetHexaAbsolutePlayer:
         for _ in range(iterations):
             if rospy.is_shutdown():
                 break
-            # BUG FIX: joint_abs_pub changed to joint_pub
             self.joint_pub.publish(msg)
             rospy.sleep(0.1)
         rospy.loginfo("[INFO]: Robot initialized.")
@@ -65,6 +66,7 @@ class JetHexaAbsolutePlayer:
             if rospy.is_shutdown():
                 break
             self.joint_pub.publish(msg_a)
+            rospy.sleep(0.1)
 
     def load_latest_data(self, filename=None):
         if filename:
@@ -94,12 +96,9 @@ class JetHexaAbsolutePlayer:
         abs_joint_targets = data_archive["states"][:, 6:24]
         total_steps = len(abs_joint_targets)
 
-        # Run at 2x speed to accommodate split phases
-        rate = rospy.Rate(hz * 2.0)
-        step_duration = (1.0 / (hz * 2.0)) * 0.95
-
-        # Track the "last known" commanded positions to use as freeze points
-        last_commanded = self.current_joints.copy()
+        # In non-gait mode, we run at standard Hz
+        rate = rospy.Rate(hz)
+        step_duration = (1.0 / hz) * 0.95
 
         # Execution Loop
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
@@ -109,26 +108,11 @@ class JetHexaAbsolutePlayer:
 
             target_full = abs_joint_targets[i].tolist()
 
-            # --- PHASE 1: Move Tripod A, Freeze Tripod B ---
-            msg_a = JointCommand()
-            msg_a.target = [
-                target_full[j] if j in self.groups["Group A"] else last_commanded[j]
-                for j in range(18)
-            ]
-            msg_a.duration = step_duration
-            self.joint_pub.publish(msg_a)
-            last_commanded = msg_a.target.copy()
-            rate.sleep()
-
-            # --- PHASE 2: Move Tripod B, Freeze Tripod A ---
-            msg_b = JointCommand()
-            msg_b.target = [
-                target_full[j] if j in self.groups["Group B"] else last_commanded[j]
-                for j in range(18)
-            ]
-            msg_b.duration = step_duration
-            self.joint_pub.publish(msg_b)
-            last_commanded = msg_b.target.copy()
+            # --- Move ALL 18 joints simultaneously ---
+            msg = JointCommand()
+            msg.target = target_full
+            msg.duration = step_duration
+            self.joint_pub.publish(msg)
             rate.sleep()
 
             if i % 10 == 0:
@@ -136,7 +120,7 @@ class JetHexaAbsolutePlayer:
                     f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete."
                 )
 
-        rospy.loginfo("[INFO]: Absolute Tripod Playback complete.")
+        rospy.loginfo("[INFO]: Absolute Playback complete.")
 
 
 if __name__ == "__main__":

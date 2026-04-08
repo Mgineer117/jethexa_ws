@@ -107,6 +107,9 @@ class JetHexaRLCollector:
         """Primes the IK engine by sending current-state heartbeats."""
         rospy.loginfo("Waiting for sensor stream...")
         while not (self.joints_ready and self.mocap_ready) and not rospy.is_shutdown():
+            rospy.loginfo(
+                f"  - Joints ready: {self.joints_ready}, Mocap ready: {self.mocap_ready}"
+            )
             rospy.sleep(0.1)
 
         rospy.loginfo("Priming controller with 1.5s heartbeat...")
@@ -114,7 +117,7 @@ class JetHexaRLCollector:
         msg.target = [0.0] * 18  # 0 delta = stay where you are
         msg.duration = self.dt
 
-        for _ in range(int(1.5 * self.hz)):
+        for _ in range(10):
             self.joint_pub.publish(msg)
             rospy.sleep(self.dt)
 
@@ -143,21 +146,16 @@ class JetHexaRLCollector:
         xref = np.delete(xref, 2, axis=1)
         uref = np.load(self.ref_dir)["controls"]
 
+        xref = xref[10:, :]
+        uref = uref[10:, :]
+
         rospy.loginfo("Starting Policy Rollout...")
 
-        while not rospy.is_shutdown():
-            elapsed = rospy.get_time() - start_time
-            if elapsed >= duration:
-                break
+        # Calculate total steps based on duration, bounded by the length of the reference data
+        total_steps = min(len(xref), int(duration / self.dt))
 
-            # NEW: Calculate index dynamically based on actual time
-            i = int(elapsed / self.dt)
-
-            # NEW: Safety catch to prevent IndexError
-            if i >= len(xref):
-                rospy.logwarn(
-                    "Reached end of reference trajectory. Ending rollout early."
-                )
+        for i in range(total_steps):
+            if rospy.is_shutdown():
                 break
 
             # 1. Get current state and policy decision
@@ -166,22 +164,31 @@ class JetHexaRLCollector:
 
             with torch.no_grad():
                 du, _ = self.policy(torch.from_numpy(state).float().unsqueeze(0))
-            u = uref[i] + 0.01 * du.cpu().numpy().squeeze()
+                if torch.isnan(du).any():
+                    rospy.logwarn(
+                        f"NaN detected in policy output at step {i}. Using zero action."
+                    )
+                    du = torch.zeros_like(du)
+                du = 0.01 * du.cpu().numpy().squeeze()
 
-            target = u * self.dt
+                rospy.loginfo(f"Step {i+1}/{total_steps} | Policy Output (du): {du}")
+
+            target = uref[i] + (du * self.dt)
 
             # 2. Command the robot
             msg = JointCommand()
             msg.target = target.tolist()
-            msg.duration = self.dt * 0.9
+            msg.duration = self.dt * 0.95
             self.joint_pub.publish(msg)
 
             # 3. Record
             self.recorded_states.append(state)
-            self.recorded_actions.append(u)
+            self.recorded_actions.append(target)  # Recording the actual commanded delta
 
             # 4. Prepare for next iteration
             self.prev_joint_pos = np.copy(self.joint_pos)
+
+            # 5. Sleep strictly maintains the control loop dt
             self.rate.sleep()
 
         self.stop_robot()

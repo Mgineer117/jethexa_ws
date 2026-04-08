@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-JET-HEXA TRAJECTORY PLAYBACK (FORCED TRIPOD MODE)
+JET-HEXA TRAJECTORY PLAYBACK (SIMULTANEOUS 18-DOF MODE)
 ----------------------------
 Functionality:
 1. Finds the most recent .npz/.npy data file.
 2. Extracts the 18-DOF relative joint controls.
-3. Splits each step into Tripod A and Tripod B movements.
-4. Publishes these deltas alternately to the robot.
+3. Publishes all 18 joint deltas simultaneously to the robot.
 """
 
 import glob
@@ -16,7 +15,7 @@ import numpy as np
 import rospy
 
 from jethexa_controller_interfaces.msg import JointCommand
-from parameters import GROUP_A, GROUP_B, HZ, INIT_JOINT_POS
+from parameters import HZ, INIT_JOINT_POS
 
 
 class JetHexaTrajectoryPlayer:
@@ -24,11 +23,6 @@ class JetHexaTrajectoryPlayer:
         rospy.init_node("jethexa_trajectory_player", anonymous=True)
 
         self.directory = directory
-
-        self.groups = {
-            "Group A": GROUP_A,
-            "Group B": GROUP_B,
-        }
 
         # Publishers
         self.joint_rel_pub = rospy.Publisher(
@@ -94,38 +88,23 @@ class JetHexaTrajectoryPlayer:
         joint_controls = data["controls"]
         total_steps = len(joint_controls)
 
-        # In tripod mode, we do TWO movements per timestep (Group A, then Group B).
-        rate = rospy.Rate(hz * 2.0)
-        step_duration = (1.0 / (hz * 2.0)) * 0.95  # add margin
+        # In non-gait mode, we do ONE movement per timestep containing all 18 DOF.
+        rate = rospy.Rate(hz)
+        step_duration = (1.0 / hz) * 0.95  # add margin
 
         # Execution Loop
-        rospy.loginfo(
-            f"[INFO]: Playing Trajectory with {total_steps} execution steps."  # BUG FIX: Changed Collecting to Playing
-        )
+        rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
 
             target_full = joint_controls[i].tolist()
 
-            # --- PHASE 1: Move Tripod A, Freeze Tripod B ---
-            msg_a = JointCommand()
-            msg_a.target = [
-                target_full[j] if j in self.groups["Group A"] else 0.0
-                for j in range(18)
-            ]
-            msg_a.duration = step_duration
-            self.joint_rel_pub.publish(msg_a)
-            rate.sleep()
-
-            # --- PHASE 2: Move Tripod B, Freeze Tripod A ---
-            msg_b = JointCommand()
-            msg_b.target = [
-                target_full[j] if j in self.groups["Group B"] else 0.0
-                for j in range(18)
-            ]
-            msg_b.duration = step_duration
-            self.joint_rel_pub.publish(msg_b)
+            # --- Move ALL 18 joints simultaneously ---
+            msg = JointCommand()
+            msg.target = target_full
+            msg.duration = step_duration
+            self.joint_rel_pub.publish(msg)
             rate.sleep()
 
             if i % 10 == 0:
@@ -133,7 +112,7 @@ class JetHexaTrajectoryPlayer:
                     f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete."
                 )
 
-        rospy.loginfo("[INFO]: Relative Tripod Playback complete.")
+        rospy.loginfo("[INFO]: Relative Playback complete.")
         self.stop_robot()
 
 
