@@ -166,7 +166,7 @@ class JetHexaRLCollector:
 
             with torch.no_grad():
                 du, _ = self.policy(torch.from_numpy(state).float().unsqueeze(0))
-            u = uref[i] + du.cpu().numpy().squeeze()
+            u = uref[i] + 0.01 * du.cpu().numpy().squeeze()
 
             target = u * self.dt
 
