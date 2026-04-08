@@ -19,10 +19,13 @@ from parameters import HZ, INIT_JOINT_POS
 
 
 class JetHexaTrajectoryPlayer:
-    def __init__(self, directory="hexapod_data"):
+    def __init__(self, directory="hexapod_data", hz=10.0):
         rospy.init_node("jethexa_trajectory_player", anonymous=True)
 
         self.directory = directory
+        self.hz = hz
+        self.dt = 1.0 / self.hz
+        self.rate = rospy.Rate(self.hz)
 
         # Publishers
         self.joint_rel_pub = rospy.Publisher(
@@ -79,18 +82,18 @@ class JetHexaTrajectoryPlayer:
             return None
         return np.load(test_file)
 
-    def play_trajectory(self, hz=10.0):
+    def play_trajectory(self):
         # data = self.load_latest_data()
         data = self.load_test_data()
         if data is None:
             return
 
         joint_controls = data["controls"]
+        joint_targets = joint_controls * self.dt
         total_steps = len(joint_controls)
 
         # In non-gait mode, we do ONE movement per timestep containing all 18 DOF.
-        rate = rospy.Rate(hz)
-        step_duration = (1.0 / hz) * 0.95  # add margin
+        step_duration = self.dt * 0.95  # add margin
 
         # Execution Loop
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
@@ -98,14 +101,14 @@ class JetHexaTrajectoryPlayer:
             if rospy.is_shutdown():
                 break
 
-            target_full = joint_controls[i].tolist()
+            target_full = joint_targets[i].tolist()
 
             # --- Move ALL 18 joints simultaneously ---
             msg = JointCommand()
             msg.target = target_full
             msg.duration = step_duration
             self.joint_rel_pub.publish(msg)
-            rate.sleep()
+            self.rate.sleep()
 
             if i % 10 == 0:
                 rospy.loginfo(
@@ -118,7 +121,7 @@ class JetHexaTrajectoryPlayer:
 
 if __name__ == "__main__":
     try:
-        player = JetHexaTrajectoryPlayer(directory="hexapod_data")
-        player.play_trajectory(hz=HZ)
+        player = JetHexaTrajectoryPlayer(directory="hexapod_data", hz=HZ)
+        player.play_trajectory()
     except rospy.ROSInterruptException:
         pass

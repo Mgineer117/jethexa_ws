@@ -28,8 +28,8 @@ class HexapodDynamicsDataset(Dataset):
                 break
 
             try:
-                states = np.load(f)["states"][-315:-14]
-                controls = np.load(f)["controls"][-315:-14]
+                states = np.load(f)["states"]  # [-315:-14]
+                controls = np.load(f)["controls"]  # [-315:-14]
 
                 # Sanity checks
                 if np.isnan(states).any() or states.shape[0] < 300:
@@ -210,7 +210,7 @@ def plot_learning_curves(train_losses, val_losses, lrs):
 # 4. MAIN TRAINING LOOP
 # ==========================================
 def train_dynamics_model(
-    data_dir="hexapod_data", epochs=500, batch_size=256, initial_lr=3e-4, min_lr=1e-6
+    data_dir="hexapod_data", epochs=500, batch_size=512, initial_lr=1e-3, min_lr=1e-5
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on device: {device}")
@@ -331,4 +331,4 @@ def train_dynamics_model(
 
 
 if __name__ == "__main__":
-    train_dynamics_model("hexapod_data", epochs=2000)
+    train_dynamics_model("hexapod_data", epochs=3000)

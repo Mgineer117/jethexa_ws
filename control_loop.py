@@ -169,11 +169,11 @@ class JetHexaRLCollector:
                         f"NaN detected in policy output at step {i}. Using zero action."
                     )
                     du = torch.zeros_like(du)
-                du = 0.01 * du.cpu().numpy().squeeze()
+                du = 0.1 * du.cpu().numpy().squeeze()
 
                 rospy.loginfo(f"Step {i+1}/{total_steps} | Policy Output (du): {du}")
 
-            target = uref[i] + (du * self.dt)
+            target = (uref[i] + du) * self.dt
 
             # 2. Command the robot
             msg = JointCommand()

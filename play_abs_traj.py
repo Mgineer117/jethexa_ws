@@ -21,10 +21,14 @@ from parameters import HZ, INIT_JOINT_POS
 
 
 class JetHexaAbsolutePlayer:
-    def __init__(self, directory="hexapod_data"):
+    def __init__(self, directory="hexapod_data", hz=10.0):
         rospy.init_node("jethexa_abs_player", anonymous=True)
 
         self.directory = directory
+        self.hz = hz
+        self.dt = 1.0 / self.hz
+        self.rate = rospy.Rate(self.hz)
+
         self.current_joints = None
 
         # Subscribers
@@ -79,11 +83,18 @@ class JetHexaAbsolutePlayer:
         latest_file = max(files, key=os.path.getmtime)
         return np.load(latest_file)
 
+    def load_test_data(self):
+        test_file = os.path.join("models/test_traj.npz")
+        if not os.path.exists(test_file):
+            rospy.logerr(f"Test file not found: {test_file}")
+            return None
+        return np.load(test_file)
+
     def _joint_cb(self, msg):
         self.current_joints = list(msg.position)[:18]
 
     def play_trajectory(self, hz=10.0):
-        data_archive = self.load_latest_data()
+        data_archive = self.load_test_data()
         if data_archive is None:
             return
 
@@ -97,8 +108,7 @@ class JetHexaAbsolutePlayer:
         total_steps = len(abs_joint_targets)
 
         # In non-gait mode, we run at standard Hz
-        rate = rospy.Rate(hz)
-        step_duration = (1.0 / hz) * 0.95
+        step_duration = self.dt * 0.95
 
         # Execution Loop
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
@@ -113,7 +123,7 @@ class JetHexaAbsolutePlayer:
             msg.target = target_full
             msg.duration = step_duration
             self.joint_pub.publish(msg)
-            rate.sleep()
+            self.rate.sleep()
 
             if i % 10 == 0:
                 rospy.loginfo(
@@ -125,8 +135,8 @@ class JetHexaAbsolutePlayer:
 
 if __name__ == "__main__":
     try:
-        player = JetHexaAbsolutePlayer()
-        player.play_trajectory(hz=HZ)
+        player = JetHexaAbsolutePlayer(directory="hexapod_data", hz=HZ)
+        player.play_trajectory()
         player.stop_robot()
     except rospy.ROSInterruptException:
         pass

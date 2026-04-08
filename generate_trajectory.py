@@ -90,7 +90,7 @@ class JetHexaDataCollector:
         - [3:6]   : Orientation (\phi, \theta, \psi)
         - [6:24]  : Joint Positions (rad)
         """
-        control = self.joint_pos - self.prev_joint_pos
+        control = (self.joint_pos - self.prev_joint_pos) / self.dt
         state = np.concatenate([self.base_pos, self.base_orientation, self.joint_pos])
         self.prev_joint_pos = np.copy(self.joint_pos)
         return state, control
@@ -206,6 +206,7 @@ class JetHexaDataCollector:
         plt.tight_layout(rect=[0, 0, 1, 0.97])
         plt.savefig(save_path)
         plt.close(fig)
+
         rospy.loginfo(f"Plot saved to {save_path}")
 
     def save_data(self, mode):
