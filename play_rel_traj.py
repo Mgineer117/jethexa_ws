@@ -78,8 +78,16 @@ class JetHexaTrajectoryPlayer:
         latest_file = max(files, key=os.path.getmtime)
         return np.load(latest_file)
 
+    def load_test_data(self):
+        test_file = os.path.join("models/test_traj.npz")
+        if not os.path.exists(test_file):
+            rospy.logerr(f"Test file not found: {test_file}")
+            return None
+        return np.load(test_file)
+
     def play_trajectory(self, hz=10.0):
-        data = self.load_latest_data()
+        # data = self.load_latest_data()
+        data = self.load_test_data()
         if data is None:
             return
 
