@@ -44,7 +44,7 @@ class JetHexaDataCollector:
 
         # Subscribers
         rospy.Subscriber("/joint_states", JointState, self.joint_cb)
-        rospy.Subscriber("/imu/filtered", Imu, self.imu_cb)
+        # rospy.Subscriber("/imu/filtered", Imu, self.imu_cb)
         rospy.Subscriber("/qualysis/jethexa", PoseStamped, self.base_pos_cb)
 
         # Publishers
