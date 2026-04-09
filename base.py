@@ -7,7 +7,33 @@ from geometry_msgs.msg import PoseStamped, Twist
 from sensor_msgs.msg import Imu, JointState
 
 from jethexa_controller_interfaces.msg import JointCommand
-from parameters import HZ, INIT_JOINT_POS
+
+INIT_JOINT_POS = [
+    0.17120142291266816,
+    0.7383813588273885,
+    -0.574647577430417,
+    0.0,
+    0.7435823754497041,
+    -0.5952505177281151,
+    -0.17120142291266816,
+    0.7383813588273885,
+    -0.574647577430417,
+    0.17120142291266838,
+    0.7383813588273884,
+    -0.5746475774304161,
+    0.0,
+    0.7435823754497041,
+    -0.5952505177281151,
+    -0.17120142291266838,
+    0.7383813588273884,
+    -0.5746475774304161,
+]
+
+
+HZ = 10
+
+GROUP_A = [0, 1, 2, 6, 7, 8, 12, 13, 14]
+GROUP_B = [3, 4, 5, 9, 10, 11, 15, 16, 17]
 
 
 class Base:
