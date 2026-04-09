@@ -173,7 +173,10 @@ class JetHexaRLCollector:
 
                 rospy.loginfo(f"Step {i+1}/{total_steps} | Policy Output (du): {du}")
 
-            target = (uref[i] + du) * self.dt
+            u = uref[i] + du
+            u = np.clip(u, -5.0, 5.0)  # Clip to reasonable joint velocity limits
+
+            target = u * self.dt
 
             # 2. Command the robot
             msg = JointCommand()
