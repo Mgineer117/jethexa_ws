@@ -8,127 +8,63 @@ Functionality:
 3. Publishes all 18 joint targets simultaneously to the robot.
 """
 
-import glob
-import os
-
-import matplotlib
 import numpy as np
 import rospy
-from sensor_msgs.msg import JointState
-from std_msgs.msg import String
 
+from base import Base
 from jethexa_controller_interfaces.msg import JointCommand
-from parameters import HZ, INIT_JOINT_POS
+
+config = {
+    "use_mocap": False,
+    "use_imu": False,
+    "listen_joint_states": True,
+    "use_abs_joint_commands": True,
+    "use_rel_joint_commands": False,
+    "load_test_traj": True,
+    "load_recent_traj": False,
+}
 
 
-class JetHexaAbsolutePlayer:
-    def __init__(self, directory="hexapod_data", hz=10.0):
+class JetHexaAbsolutePlayer(Base):
+    def __init__(
+        self,
+    ):
+        super().__init__(config=config)
+
         rospy.init_node("jethexa_abs_player", anonymous=True)
 
-        self.directory = directory
-        self.hz = hz
-        self.dt = 1.0 / self.hz
-        self.rate = rospy.Rate(self.hz)
-
-        # Publishers
-        self.joint_pub = rospy.Publisher(
-            "/jethexa_controller/set_joints_raw",
-            JointCommand,
-            queue_size=1,
-            tcp_nodelay=True,
-        )
-
-        self.data = self.load_test_data()
-        if self.data is None:
-            rospy.logerr("No trajectory data found. Exiting.")
-            exit(1)
-
-        self.initiate_robot()
-
-    def initiate_robot(self, iterations=10):
-        """Forces the IK engine to engage without moving the physical legs."""
-        rospy.loginfo("[INFO]: Initializing robot...")
-        init_ref_joint_pos = self.data["states"][0, 6:24].tolist()
-
-        msg = JointCommand()
-        msg.target = init_ref_joint_pos
-        msg.duration = 0.1
-
-        for _ in range(iterations):
-            if rospy.is_shutdown():
-                break
-            self.joint_pub.publish(msg)
-            rospy.sleep(0.1)
-        rospy.loginfo("[INFO]: Robot initialized.")
-
-    def stop_robot(self):
-        msg_a = JointCommand()
-        msg_a.target = INIT_JOINT_POS
-        msg_a.duration = 1.0
-        for _ in range(5):
-            if rospy.is_shutdown():
-                break
-            self.joint_pub.publish(msg_a)
-            rospy.sleep(0.1)
-
-    def load_latest_data(self, filename=None):
-        """
-        24-dim State Vector (Updated):
-        - [0:3]   : Position (x,y,z)
-        - [3:6]   : Orientation (\theta, \phi, \psi)
-        - [6:24]  : Joint Positions (18 DOF)
-        """
-        if filename:
-            return np.load(os.path.join(self.directory, filename))
-
-        files = glob.glob(os.path.join(self.directory, "*.npz"))
-        if not files:
-            rospy.logerr(f"No .npz files found in: {self.directory}")
-            return None
-        latest_file = max(files, key=os.path.getmtime)
-        return np.load(latest_file)
-
-    def load_test_data(self):
-        """
-        24-dim State Vector (Updated):
-        - [0:3]   : Position (x,y,z)
-        - [3:6]   : Orientation (\theta, \phi, \psi)
-        - [6:24]  : Joint Positions (18 DOF)
-        """
-
-        test_file = os.path.join("models/test_traj.npz")
-        if not os.path.exists(test_file):
-            rospy.logerr(f"Test file not found: {test_file}")
-            return None
-        return np.load(test_file)
-
     def play_trajectory(self):
-        abs_joint_targets = self.data["states"][:, 6:24]
+        abs_joint_targets = self.test_data["states"][:, 6:24]
         total_steps = len(abs_joint_targets)
 
-        # In non-gait mode, we run at standard Hz
-        step_duration = self.dt * 0.95
-
         # Execution Loop
-        target = []
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
 
-            target_full = abs_joint_targets[i].tolist()
-            target.append(target_full)
+            target_joint_pos = abs_joint_targets[i].tolist()
 
             # --- Move ALL 18 joints simultaneously ---
             msg = JointCommand()
-            msg.target = target_full
-            msg.duration = step_duration
-            self.joint_pub.publish(msg)
-            self.rate.sleep()
+            msg.target = target_joint_pos
+            msg.duration = self.duration
+
+            # Keep publishing and checking until the error is within the threshold
+            while not rospy.is_shutdown():
+                self.joint_pub.publish(msg)
+                self.rate.sleep()
+
+                sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
+                rospy.loginfo(
+                    f"[INFO] Moving robot... Squared joint error: {sq_error:.6f}"
+                )
+                if sq_error < self.joint_error_threshold:
+                    break
 
             if i % 10 == 0:
                 rospy.loginfo(
-                    f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete: Target: {target_full}."
+                    f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete."
                 )
 
         rospy.loginfo("[INFO]: Absolute Playback complete.")
@@ -136,7 +72,8 @@ class JetHexaAbsolutePlayer:
 
 if __name__ == "__main__":
     try:
-        player = JetHexaAbsolutePlayer(directory="hexapod_data", hz=HZ)
+        player = JetHexaAbsolutePlayer()
+        player.initialize_robot_for_replay()
         player.play_trajectory()
         player.stop_robot()
     except rospy.ROSInterruptException:
