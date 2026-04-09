@@ -124,19 +124,6 @@ class JetHexaRLCollector:
         self.prev_joint_pos = np.copy(self.joint_pos)
         rospy.loginfo("Warmup complete. Controller is 'hot'.")
 
-    def get_action_from_policy(self, state):
-        """
-        Policy outputs Joint Velocity (rad/s).
-        We return relative delta (rad) = Velocity * dt
-        """
-        state_tensor = torch.FloatTensor(state).unsqueeze(0)
-        with torch.no_grad():
-            # action_rate = self.policy(state_tensor).cpu().numpy().squeeze()
-            action_rate = np.random.uniform(-0.5, 0.5, 18)  # Mock inference
-
-        # Scale by dt to get the relative displacement for this timestep
-        return action_rate * self.dt
-
     def run_rollout(self, duration=33.0):
         self.recorded_states = []
         self.recorded_actions = []

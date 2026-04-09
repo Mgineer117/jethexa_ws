@@ -90,7 +90,13 @@ class JetHexaDataCollector:
         - [3:6]   : Orientation (\phi, \theta, \psi)
         - [6:24]  : Joint Positions (rad)
         """
+        # wrapped_diff = (self.joint_pos - self.prev_joint_pos + np.pi) % (
+        #     2 * np.pi
+        # ) - np.pi
+
+        # 3. Calculate true velocity
         control = (self.joint_pos - self.prev_joint_pos) / self.dt
+
         state = np.concatenate([self.base_pos, self.base_orientation, self.joint_pos])
         self.prev_joint_pos = np.copy(self.joint_pos)
         return state, control
