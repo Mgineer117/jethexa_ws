@@ -118,12 +118,12 @@ class JetHexaDataCollector:
         while not rospy.is_shutdown() and (rospy.get_time() - start_time) < duration:
             elapsed = rospy.get_time() - start_time
 
-            cmd = get_cmd_func(elapsed)
-            self.cmd_pub.publish(cmd)
-
             state, control = self.get_current_state()
             self.recorded_states.append(state)
             self.recorded_controls.append(control)
+
+            cmd = get_cmd_func(elapsed)
+            self.cmd_pub.publish(cmd)
 
             self.rate.sleep()
 

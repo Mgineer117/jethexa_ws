@@ -38,15 +38,18 @@ class JetHexaRLCollector:
         self.joint_pos = np.zeros(18)
         self.prev_joint_pos = np.zeros(18)
 
+        # --- VIRTUAL TARGET STATE ---
+        self.virtual_target = np.zeros(18)
+
         self.joints_ready = False
         self.mocap_ready = False
 
         # Load PyTorch Model
         self.policy = self.load_policy(algo_name)
 
-        # ROS Communication
+        # ROS Communication - Changed to ABSOLUTE raw topic
         self.joint_pub = rospy.Publisher(
-            "/jethexa_controller/set_joints_relative",
+            "/jethexa_controller/set_joints_raw",
             JointCommand,
             queue_size=1,
             tcp_nodelay=True,
@@ -98,10 +101,11 @@ class JetHexaRLCollector:
 
     def stop_robot(self):
         msg = JointCommand()
-        msg.target = [0.0] * 18
+        # Lock the robot at its CURRENT physical position to prevent snapping
+        msg.target = self.joint_pos.tolist()
         msg.duration = 0.5
         self.joint_pub.publish(msg)
-        rospy.loginfo("Robot locked at current pose.")
+        rospy.loginfo("Robot locked at current physical pose.")
 
     def warmup_controller(self):
         """Primes the IK engine by sending current-state heartbeats."""
@@ -114,10 +118,14 @@ class JetHexaRLCollector:
 
         rospy.loginfo("Priming controller with 1.5s heartbeat...")
         msg = JointCommand()
-        msg.target = [0.0] * 18  # 0 delta = stay where you are
         msg.duration = self.dt
 
+        # Initialize the virtual target exactly where the robot is physically sitting
+        self.virtual_target = np.copy(self.joint_pos)
+
         for _ in range(10):
+            # Command the absolute virtual target (which matches actual position)
+            msg.target = self.virtual_target.tolist()
             self.joint_pub.publish(msg)
             rospy.sleep(self.dt)
 
@@ -138,7 +146,6 @@ class JetHexaRLCollector:
 
         rospy.loginfo("Starting Policy Rollout...")
 
-        # Calculate total steps based on duration, bounded by the length of the reference data
         total_steps = min(len(xref), int(duration / self.dt))
 
         for i in range(total_steps):
@@ -158,22 +165,26 @@ class JetHexaRLCollector:
                     du = torch.zeros_like(du)
                 du = 0.1 * du.cpu().numpy().squeeze()
 
-                rospy.loginfo(f"Step {i+1}/{total_steps} | Policy Output (du): {du}")
-
             u = uref[i] + du
-            u = np.clip(u, -5.0, 5.0)  # Clip to reasonable joint velocity limits
+            u = np.clip(u, -5.0, 5.0)
 
-            target = u * self.dt
+            # Calculate the positional delta for this timestep
+            target_delta = u * self.dt
 
-            # 2. Command the robot
+            # --- INTEGRATION STEP ---
+            # Update the absolute virtual target
+            self.virtual_target += target_delta
+
+            # 2. Command the robot using the ABSOLUTE virtual target
             msg = JointCommand()
-            msg.target = target.tolist()
+            msg.target = self.virtual_target.tolist()
             msg.duration = self.dt * 0.95
             self.joint_pub.publish(msg)
 
             # 3. Record
             self.recorded_states.append(state)
-            self.recorded_actions.append(target)  # Recording the actual commanded delta
+            # Recording the delta here so the data matches the format of your previous script
+            self.recorded_actions.append(target_delta)
 
             # 4. Prepare for next iteration
             self.prev_joint_pos = np.copy(self.joint_pos)
