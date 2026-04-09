@@ -29,9 +29,8 @@ class JetHexaAbsolutePlayer(Base):
     def __init__(
         self,
     ):
-        super().__init__(config=config)
-
         rospy.init_node("jethexa_abs_player", anonymous=True)
+        super().__init__(config=config)
 
     def play_trajectory(self):
         abs_joint_targets = self.test_data["states"][:, 6:24]
@@ -51,16 +50,19 @@ class JetHexaAbsolutePlayer(Base):
             msg.duration = self.duration
 
             # Keep publishing and checking until the error is within the threshold
+            j = 0
             while not rospy.is_shutdown():
                 self.joint_pub.publish(msg)
                 self.rate.sleep()
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
-                rospy.loginfo(
-                    f"[INFO] Moving robot... Squared joint error: {sq_error:.6f}"
-                )
+                if j % 5 == 0:  # Log every 5 iterations to avoid spamming
+                    rospy.loginfo(
+                        f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
+                    )
                 if sq_error < self.joint_error_threshold:
                     break
+                j += 1
 
             if i % 10 == 0:
                 rospy.loginfo(

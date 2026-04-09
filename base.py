@@ -85,7 +85,7 @@ class Base:
         self.rate = rospy.Rate(self.hz)
 
         self.init_joint_pos = INIT_JOINT_POS
-        self.joint_error_threshold = 1e-2
+        self.joint_error_threshold = 1e-3
 
         self.check_sensors()
 
@@ -107,7 +107,7 @@ class Base:
         self.imu_ready = True
 
     def joint_cb(self, msg):
-        self.joint_pos = np.array(msg.position)
+        self.joint_pos = np.array(msg.position)[:18]
         self.joints_ready = True
 
     # ------------------------------------------------------------------
@@ -243,7 +243,7 @@ class Base:
             rospy.logwarn("stop_robot() called but no joint publisher is configured.")
             return
 
-        target_joint_pos = self.init_joint_pos.tolist()
+        target_joint_pos = self.init_joint_pos
         msg = JointCommand()
         msg.target = target_joint_pos
         msg.duration = self.duration
