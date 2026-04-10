@@ -52,7 +52,7 @@ class JetHexaAbsolutePlayer(Base):
             # Keep publishing and checking until the error is within the threshold
             j = 0
             while not rospy.is_shutdown():
-                self.joint_pub.publish(msg)
+                self.joint_abs_pub.publish(msg)
                 self.rate.sleep()
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)

@@ -15,8 +15,8 @@ from std_msgs.msg import String
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from base import HZ
 from jethexa_controller_interfaces.msg import JointCommand
-from parameters import HZ
 
 
 class JetHexaDataCollector:

@@ -81,7 +81,6 @@ class Base:
                 queue_size=1,
                 tcp_nodelay=True,
             )
-            self.joint_pub = self.joint_abs_pub  # FIX: was never defined
 
         if self.use_rel_joint_commands:
             self.joint_rel_pub = rospy.Publisher(
