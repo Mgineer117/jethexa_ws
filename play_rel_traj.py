@@ -74,7 +74,6 @@ class JetHexaTrajectoryPlayer(Base):
                 )
 
         rospy.loginfo("[INFO]: Integrated Virtual Absolute Playback complete.")
-        self.stop_robot()
 
 
 if __name__ == "__main__":

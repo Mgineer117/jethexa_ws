@@ -71,7 +71,7 @@ class Base:
             rospy.Subscriber("/joint_states", JointState, self.joint_cb)
             self.joint_pos = np.copy(INIT_JOINT_POS)  # safe default until first msg
 
-        # Exactly one joint-command publisher is exposed as self.joint_pub so
+        # Exactly one joint-command publisher is exposed as self.joint_abs_pub so
         # that the rest of the class doesn't need to know which topic is live.
         # Absolute commands take priority when both flags are set.
         if self.use_abs_joint_commands:
@@ -91,12 +91,12 @@ class Base:
             )
             # Only fall back to relative publisher when no absolute publisher exists.
             if not self.use_abs_joint_commands:
-                self.joint_pub = self.joint_rel_pub  # FIX: was never defined
+                self.joint_abs_pub = self.joint_rel_pub  # FIX: was never defined
 
         if not self.use_abs_joint_commands and not self.use_rel_joint_commands:
             # Neither publisher requested – create a harmless sentinel so that
             # stop_robot() / check_sensors() do not crash if called anyway.
-            self.joint_pub = None
+            self.joint_abs_pub = None
 
         if self.load_test_traj:
             self.test_data = self.load_test_data()
@@ -108,6 +108,8 @@ class Base:
         self.dt = 1.0 / self.hz
         self.duration = self.dt * 0.95
         self.rate = rospy.Rate(self.hz)
+
+        self.safe_rate = rospy.Rate(5 * self.hz)
 
         self.init_joint_pos = INIT_JOINT_POS
         self.joint_error_threshold = 1e-3
@@ -212,7 +214,7 @@ class Base:
 
     def initialize_robot_for_replay(self):
         """Moves the robot to the initial pose of the trajectory for a smooth start."""
-        if self.joint_pub is None:
+        if self.joint_abs_pub is None:
             rospy.logwarn(
                 "initialize_robot_for_replay() called but no joint publisher is configured."
             )
@@ -243,7 +245,7 @@ class Base:
         if self.listen_joint_states:
             # Keep publishing and checking until the error is within the threshold
             while not rospy.is_shutdown():
-                self.joint_pub.publish(msg)
+                self.joint_abs_pub.publish(msg)
                 self.rate.sleep()  # Sleep to maintain the loop rate
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
@@ -259,12 +261,12 @@ class Base:
             for _ in range(int(self.hz)):
                 if rospy.is_shutdown():
                     break
-                self.joint_pub.publish(msg)
+                self.joint_abs_pub.publish(msg)
                 self.rate.sleep()
 
     def stop_robot(self):
         """Send the robot back to its default standing pose."""
-        if self.joint_pub is None:
+        if self.joint_abs_pub is None:
             rospy.logwarn("stop_robot() called but no joint publisher is configured.")
             return
 
@@ -276,7 +278,7 @@ class Base:
         if self.listen_joint_states:
             # Keep publishing and checking until the error is within the threshold
             while not rospy.is_shutdown():
-                self.joint_pub.publish(msg)
+                self.joint_abs_pub.publish(msg)
                 self.rate.sleep()  # Sleep to maintain the loop rate
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
@@ -292,5 +294,5 @@ class Base:
             for _ in range(int(self.hz)):
                 if rospy.is_shutdown():
                     break
-                self.joint_pub.publish(msg)
+                self.joint_abs_pub.publish(msg)
                 self.rate.sleep()

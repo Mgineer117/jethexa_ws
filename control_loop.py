@@ -41,7 +41,7 @@ class JetHexaRLCollector(Base):
             mode = "stochastic"
         elif algo_name == "carl":
             path = "models/carl.pth"
-            mode = "stochastic"
+            mode = "deterministic"
         elif algo_name == "c3m":
             path = "models/c3m.pth"
             mode = "deterministic"
@@ -66,12 +66,11 @@ class JetHexaRLCollector(Base):
     def run_rollout(self, control_scaler: float, duration=33.0):
         self.recorded_states, self.recorded_actions = [], []
 
-        xref = np.delete(self.test_data["states"], 2, axis=1)[10:, :]
-        uref = self.test_data["controls"][10:, :]
+        xref = np.delete(self.test_data["states"], 2, axis=1)  # [-300:, :]
+        uref = self.test_data["controls"]  # [-300:, :]
 
         total_steps = min(len(xref), int(duration / self.dt))
 
-        # target_joint_pos = np.array(self.joint_pos, dtype=float)
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
         for i in range(total_steps):
             if rospy.is_shutdown():
@@ -98,31 +97,33 @@ class JetHexaRLCollector(Base):
             u = uref[i] + du
             u = np.clip(u, -5.0, 5.0)
 
-            # Calculate the positional delta for this timestep
-            # target_delta = u * self.dt
-            # target_joint_pos += target_delta
-            target_joint_pos = self.joint_pos + u * self.dt
+            # delta = u * self.dt
+            target_joint_pos = joint_pos + u * self.dt
 
+            # 1. Publish current target FIRST (at i=0, publishes states[0])
             msg = JointCommand()
             msg.target = target_joint_pos.tolist()
             msg.duration = self.duration
 
-            # Keep publishing and checking until the error is within the threshold
-            j = 0
-            while not rospy.is_shutdown():
-                self.joint_abs_pub.publish(msg)
-                self.rate.sleep()
+            self.joint_abs_pub.publish(msg)
+            self.rate.sleep()
 
-                sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
-                if j % 5 == 0:  # Log every 5 iterations to avoid spamming
-                    rospy.loginfo(
-                        f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
-                    )
-                if sq_error < self.joint_error_threshold:
-                    break
-                j += 1
+            # # Keep publishing and checking until the error is within the threshold
+            # j = 0
+            # while not rospy.is_shutdown():
+            #     self.joint_abs_pub.publish(msg)
+            #     self.rate.sleep()
 
-            # 3. Record
+            #     sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
+            #     if j % 5 == 0:  # Log every 5 iterations to avoid spamming
+            #         rospy.loginfo(
+            #             f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
+            #         )
+            #     if sq_error < self.joint_error_threshold:
+            #         break
+            #     j += 1
+
+            # 3. Record (rest of your code)
             self.recorded_states.append(state)
             self.recorded_actions.append(u)
 
@@ -144,15 +145,15 @@ class JetHexaRLCollector(Base):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo-name", type=str, default="ppo")
-    parser.add_argument("--control-scaler", type=float, default=1.0)
+    parser.add_argument("--control-scaler", type=float, default=0.7)
     parser.add_argument("--duration", type=float, default=33.0)
     args = parser.parse_args()
 
     try:
         collector = JetHexaRLCollector(algo_name=args.algo_name)
-        collector.run_rollout(
-            control_scaler=args.control_scaler, duration=args.duration
-        )
+        # collector.run_rollout(
+        #     control_scaler=args.control_scaler, duration=args.duration
+        # )
         collector.stop_robot()
     except rospy.ROSInterruptException:
         pass
