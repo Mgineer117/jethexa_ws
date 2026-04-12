@@ -99,6 +99,9 @@ class JetHexaRLCollector(Base):
 
             # delta = u * self.dt
             target_joint_pos = joint_pos + u * self.dt
+            target_joint_pos = self.check_valid_joint_angle(
+                target_joint_pos, terminate_on_invalid=False
+            )
 
             # 1. Publish current target FIRST (at i=0, publishes states[0])
             msg = JointCommand()
@@ -107,21 +110,6 @@ class JetHexaRLCollector(Base):
 
             self.joint_abs_pub.publish(msg)
             self.rate.sleep()
-
-            # # Keep publishing and checking until the error is within the threshold
-            # j = 0
-            # while not rospy.is_shutdown():
-            #     self.joint_abs_pub.publish(msg)
-            #     self.rate.sleep()
-
-            #     sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
-            #     if j % 5 == 0:  # Log every 5 iterations to avoid spamming
-            #         rospy.loginfo(
-            #             f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
-            #         )
-            #     if sq_error < self.joint_error_threshold:
-            #         break
-            #     j += 1
 
             # 3. Record (rest of your code)
             self.recorded_states.append(state)

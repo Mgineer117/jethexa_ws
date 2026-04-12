@@ -8,6 +8,52 @@ from sensor_msgs.msg import Imu, JointState
 
 from jethexa_controller_interfaces.msg import JointCommand
 
+JOINT_MIN = np.array(
+    [
+        -np.pi / 42,  # q1
+        np.pi / 5,  # q2
+        -np.pi / 4,  # q3
+        -np.pi / 9,  # q4
+        np.pi / 4,  # q5
+        -np.pi / 4,  # q6
+        -np.pi / 6,  # q7
+        np.pi / 5,  # q8
+        -np.pi / 4,  # q9
+        -np.pi / 46,  # q10
+        np.pi / 5,  # q11
+        -np.pi / 4,  # q12
+        -np.pi / 9,  # q13
+        np.pi / 4,  # q14
+        -np.pi / 4,  # q15
+        -np.pi / 6,  # q16
+        np.pi / 5,  # q17
+        -np.pi / 4,  # q18
+    ]
+).reshape(-1, 1)
+
+JOINT_MAX = np.array(
+    [
+        np.pi / 6,  # q1
+        np.pi / 3,  # q2
+        -np.pi / 10,  # q3
+        np.pi / 9,  # q4
+        np.pi / 3,  # q5
+        -np.pi / 6,  # q6
+        np.pi / 46,  # q7
+        np.pi / 3,  # q8
+        -np.pi / 10,  # q9
+        np.pi / 6,  # q10
+        np.pi / 3,  # q11
+        -np.pi / 10,  # q12
+        np.pi / 9,  # q13
+        np.pi / 3,  # q14
+        -np.pi / 6,  # q15
+        np.pi / 42,  # q16
+        np.pi / 3,  # q17
+        -np.pi / 10,  # q18
+    ]
+).reshape(-1, 1)
+
 INIT_JOINT_POS = [
     0.17120142291266816,
     0.7383813588273885,
@@ -207,6 +253,33 @@ class Base:
             rospy.sleep(0.1)
 
         rospy.loginfo("All required sensors ready.")
+
+    def check_valid_joint_angle(
+        self, joint_angles: np.ndarray, terminate_on_invalid: bool = False
+    ) -> bool:
+        """Checks if the provided joint angles are within the defined limits."""
+        if joint_angles.shape != (18,):
+            rospy.logerr(
+                f"[Error]: Invalid joint angles shape: expected (18,), got {joint_angles.shape}"
+            )
+            raise ValueError("[Error]: Joint angles must be a 1D array of length 18.")
+
+        invalid_angles = np.logical_or(
+            joint_angles < JOINT_MIN.flatten(), joint_angles > JOINT_MAX.flatten()
+        )
+        if np.any(invalid_angles):
+            if terminate_on_invalid:
+                raise ValueError("[Error]: One or more joint angles are out of bounds.")
+            else:
+                joint_angles[invalid_angles] = np.clip(
+                    joint_angles[invalid_angles],
+                    JOINT_MIN.flatten()[invalid_angles],
+                    JOINT_MAX.flatten()[invalid_angles],
+                )
+                rospy.logwarn(
+                    "[Warning]: Out-of-bounds joint angles have been clipped to the nearest valid values."
+                )
+                return joint_angles
 
     # ------------------------------------------------------------------
     # Control helpers
