@@ -42,7 +42,11 @@ class JetHexaAbsolutePlayer(Base):
             if rospy.is_shutdown():
                 break
 
-            target_joint_pos = abs_joint_targets[i].tolist()
+            target_joint_pos = abs_joint_targets[i]
+            target_joint_pos = self.check_valid_joint_angle(
+                target_joint_pos, terminate_on_invalid=False
+            )
+            target_joint_pos = target_joint_pos.tolist()
 
             # --- Move ALL 18 joints simultaneously ---
             msg = JointCommand()
@@ -56,7 +60,9 @@ class JetHexaAbsolutePlayer(Base):
                 self.rate.sleep()
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
-                if j % 5 == 0:  # Log every 5 iterations to avoid spamming
+                if (
+                    j % 5 == 0 and sq_error > 0
+                ):  # Log every 5 iterations to avoid spamming
                     rospy.loginfo(
                         f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
                     )

@@ -8,7 +8,22 @@ from sensor_msgs.msg import Imu, JointState
 
 from jethexa_controller_interfaces.msg import JointCommand
 
-JOINT_MIN = np.array(
+# X bounds
+BOUND_EXPANSION = 3.0
+BOUND_CONTRACTION = 1.0 / BOUND_EXPANSION
+
+
+def _expand_lower_bounds(bounds: np.ndarray) -> np.ndarray:
+    """Expand lower bounds away from zero by 1.5x."""
+    return np.where(bounds < 0.0, bounds * BOUND_EXPANSION, bounds * BOUND_CONTRACTION)
+
+
+def _expand_upper_bounds(bounds: np.ndarray) -> np.ndarray:
+    """Expand upper bounds away from zero by 1.5x."""
+    return np.where(bounds < 0.0, bounds * BOUND_CONTRACTION, bounds * BOUND_EXPANSION)
+
+
+RAW_JOINT_MIN = np.array(
     [
         -np.pi / 42,  # q1
         np.pi / 5,  # q2
@@ -29,9 +44,9 @@ JOINT_MIN = np.array(
         np.pi / 5,  # q17
         -np.pi / 4,  # q18
     ]
-).reshape(-1, 1)
+)
 
-JOINT_MAX = np.array(
+RAW_JOINT_MAX = np.array(
     [
         np.pi / 6,  # q1
         np.pi / 3,  # q2
@@ -52,7 +67,10 @@ JOINT_MAX = np.array(
         np.pi / 3,  # q17
         -np.pi / 10,  # q18
     ]
-).reshape(-1, 1)
+)
+
+JOINT_MIN = _expand_lower_bounds(RAW_JOINT_MIN).reshape(-1, 1)
+JOINT_MAX = _expand_upper_bounds(RAW_JOINT_MAX).reshape(-1, 1)
 
 INIT_JOINT_POS = [
     0.17120142291266816,
@@ -280,6 +298,8 @@ class Base:
                     "[Warning]: Out-of-bounds joint angles have been clipped to the nearest valid values."
                 )
                 return joint_angles
+        else:
+            return joint_angles
 
     # ------------------------------------------------------------------
     # Control helpers
