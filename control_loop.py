@@ -66,8 +66,8 @@ class JetHexaRLCollector(Base):
     def run_rollout(self, control_scaler: float, duration=33.0):
         self.recorded_states, self.recorded_actions = [], []
 
-        xref = np.delete(self.test_data["states"], 2, axis=1)  # [-300:, :]
-        uref = self.test_data["controls"]  # [-300:, :]
+        xref = np.delete(self.test_data["states"], 2, axis=1)[-300:, :]
+        uref = self.test_data["controls"][-300:, :]
 
         total_steps = min(len(xref), int(duration / self.dt))
 
@@ -95,13 +95,13 @@ class JetHexaRLCollector(Base):
                 du = control_scaler * du.cpu().numpy().squeeze()
 
             u = uref[i] + du
-            u = np.clip(u, -5.0, 5.0)
+            u = np.clip(u, -4.0, 4.0)
 
             # delta = u * self.dt
             target_joint_pos = joint_pos + u * self.dt
-            # target_joint_pos = self.check_valid_joint_angle(
-            #     target_joint_pos, terminate_on_invalid=False
-            # )
+            target_joint_pos = self.check_valid_joint_angle(
+                target_joint_pos, terminate_on_invalid=False
+            )
 
             # 1. Publish current target FIRST (at i=0, publishes states[0])
             msg = JointCommand()

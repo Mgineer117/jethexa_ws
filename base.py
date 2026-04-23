@@ -8,69 +8,64 @@ from sensor_msgs.msg import Imu, JointState
 
 from jethexa_controller_interfaces.msg import JointCommand
 
-# X bounds
-BOUND_EXPANSION = 3.0
-BOUND_CONTRACTION = 1.0 / BOUND_EXPANSION
+_D = 10 / 11  # shrink factor for bounds that move toward zero
+_U = 11 / 10  # grow   factor for bounds that move away from zero
 
-
-def _expand_lower_bounds(bounds: np.ndarray) -> np.ndarray:
-    """Expand lower bounds away from zero by 1.5x."""
-    return np.where(bounds < 0.0, bounds * BOUND_EXPANSION, bounds * BOUND_CONTRACTION)
-
-
-def _expand_upper_bounds(bounds: np.ndarray) -> np.ndarray:
-    """Expand upper bounds away from zero by 1.5x."""
-    return np.where(bounds < 0.0, bounds * BOUND_CONTRACTION, bounds * BOUND_EXPANSION)
-
-
-RAW_JOINT_MIN = np.array(
+JOINT_MIN = np.array(
     [
-        -np.pi / 42,  # q1
-        np.pi / 5,  # q2
-        -np.pi / 4,  # q3
-        -np.pi / 9,  # q4
-        np.pi / 4,  # q5
-        -np.pi / 4,  # q6
-        -np.pi / 6,  # q7
-        np.pi / 5,  # q8
-        -np.pi / 4,  # q9
-        -np.pi / 46,  # q10
-        np.pi / 5,  # q11
-        -np.pi / 4,  # q12
-        -np.pi / 9,  # q13
-        np.pi / 4,  # q14
-        -np.pi / 4,  # q15
-        -np.pi / 6,  # q16
-        np.pi / 5,  # q17
-        -np.pi / 4,  # q18
+        -5.00,  # Base X  (facility, fixed)
+        -2.00,  # Base Y  (facility, fixed)
+        -0.030 * _U,  # phi   (data min -0.0286)
+        -0.037 * _U,  # theta (data min -0.0365)
+        -np.pi,  # psi   (fixed)
+        -0.075 * _U,  # q1
+        0.64 * _D,  # q2
+        -0.82 * _U,  # q3
+        -0.35 * _U,  # q4
+        0.72 * _D,  # q5
+        -0.77 * _U,  # q6
+        -0.52 * _U,  # q7
+        0.64 * _D,  # q8
+        -0.81 * _U,  # q9
+        -0.07 * _U,  # q10
+        0.64 * _D,  # q11
+        -0.81 * _U,  # q12
+        -0.35 * _U,  # q13
+        0.72 * _D,  # q14
+        -0.77 * _U,  # q15
+        -0.52 * _U,  # q16
+        0.64 * _D,  # q17
+        -0.82 * _U,  # q18
     ]
-)
+).reshape(-1, 1)
 
-RAW_JOINT_MAX = np.array(
+JOINT_MAX = np.array(
     [
-        np.pi / 6,  # q1
-        np.pi / 3,  # q2
-        -np.pi / 10,  # q3
-        np.pi / 9,  # q4
-        np.pi / 3,  # q5
-        -np.pi / 6,  # q6
-        np.pi / 46,  # q7
-        np.pi / 3,  # q8
-        -np.pi / 10,  # q9
-        np.pi / 6,  # q10
-        np.pi / 3,  # q11
-        -np.pi / 10,  # q12
-        np.pi / 9,  # q13
-        np.pi / 3,  # q14
-        -np.pi / 6,  # q15
-        np.pi / 42,  # q16
-        np.pi / 3,  # q17
-        -np.pi / 10,  # q18
+        0.50,  # Base X  (facility, fixed)
+        2.50,  # Base Y  (facility, fixed)
+        0.016 * _U,  # phi   (data max  0.0157)
+        0.044 * _U,  # theta (data max  0.0431)
+        np.pi,  # psi   (fixed)
+        0.52 * _U,  # q1
+        1.07 * _U,  # q2
+        -0.30 * _D,  # q3
+        0.34 * _U,  # q4
+        1.07 * _U,  # q5
+        -0.51 * _D,  # q6
+        0.07 * _U,  # q7
+        1.07 * _U,  # q8
+        -0.30 * _D,  # q9
+        0.52 * _U,  # q10
+        1.07 * _U,  # q11
+        -0.30 * _D,  # q12
+        0.34 * _U,  # q13
+        1.07 * _U,  # q14
+        -0.51 * _D,  # q15
+        0.075 * _U,  # q16
+        1.07 * _U,  # q17
+        -0.30 * _D,  # q18
     ]
-)
-
-JOINT_MIN = _expand_lower_bounds(RAW_JOINT_MIN).reshape(-1, 1)
-JOINT_MAX = _expand_upper_bounds(RAW_JOINT_MAX).reshape(-1, 1)
+).reshape(-1, 1)
 
 INIT_JOINT_POS = [
     0.17120142291266816,
@@ -95,9 +90,6 @@ INIT_JOINT_POS = [
 
 
 HZ = 10
-
-GROUP_A = [0, 1, 2, 6, 7, 8, 12, 13, 14]
-GROUP_B = [3, 4, 5, 9, 10, 11, 15, 16, 17]
 
 
 class Base:
