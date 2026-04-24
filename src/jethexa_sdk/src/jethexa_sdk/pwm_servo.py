@@ -5,14 +5,17 @@ import Jetson.GPIO as GPIO
 
 GPIO.setwarnings(False)
 
+
 class PWMServo:
-    def __init__(self,
-                 gpio = 32, 
-                 min_position=500,
-                 max_position=2500,
-                 min_duration=0.02,
-                 max_duration=30000,
-                 deviation=0):
+    def __init__(
+        self,
+        gpio=32,
+        min_position=500,
+        max_position=2500,
+        min_duration=0.02,
+        max_duration=30000,
+        deviation=0,
+    ):
 
         self.gpio = gpio
         self.min_position = min_position
@@ -26,22 +29,19 @@ class PWMServo:
         self.pos_set = self.pos_cur
         self.pos_inc = 0
         self.lock = threading.Lock()
-        
+
         GPIO.setmode(GPIO.BCM)
         self.pwm = GPIO.PWM(gpio, 50)
-
 
     def start(self):
         self.pwm.start(7.5)
         threading.Thread(target=self.update_pos_task, daemon=True).start()
-
 
     def get_position(self):
         """
         :return:
         """
         return self.pos_cur
-
 
     def set_position(self, new_pos, duration=0):
         """
@@ -67,12 +67,16 @@ class PWMServo:
                     self.inc_times -= 1
                     if self.inc_times > 0:
                         pos_cur = self.pos_set + int(self.pos_inc * self.inc_times)
-                        #The input value here is the percentage value. 50 refers to 50% here
-                        self.pwm.ChangeDutyCycle((pos_cur + self.deviation) / 200.0) # 1500 / 20000 * 100
+                        # The input value here is the percentage value. 50 refers to 50% here
+                        self.pwm.ChangeDutyCycle(
+                            (pos_cur + self.deviation) / 200.0
+                        )  # 1500 / 20000 * 100
                         self.pos_cur = pos_cur
                     elif self.inc_times == 0:
-                        #The input value here is the percentage value. 50 refers to 50% here
-                        self.pwm.ChangeDutyCycle((self.pos_set + self.deviation) / 200.0) # 1500 / 20000 * 100
+                        # The input value here is the percentage value. 50 refers to 50% here
+                        self.pwm.ChangeDutyCycle(
+                            (self.pos_set + self.deviation) / 200.0
+                        )  # 1500 / 20000 * 100
                         self.pos_cur = self.pos_set
                     else:
                         self.inc_times = -1
@@ -99,6 +103,5 @@ class PWMServo:
         return self.deviation
 
 
-pwm_servo1 = PWMServo(13) #BOARD 33
-pwm_servo2 = PWMServo(12) #BOARD 32
-
+pwm_servo1 = PWMServo(13)  # BOARD 33
+pwm_servo2 = PWMServo(12)  # BOARD 32
