@@ -133,12 +133,13 @@ class JetHexaRLCollector(Base):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--algo-name", type=str, default="ppo")
-    parser.add_argument("--control-scaler", type=float, default=0.1)
+    parser.add_argument("--control-scaler", type=float, default=0.3)
     parser.add_argument("--duration", type=float, default=33.0)
     args = parser.parse_args()
 
     try:
         collector = JetHexaRLCollector(algo_name=args.algo_name)
+        collector.initialize_robot_for_replay()
         collector.run_rollout(
             control_scaler=args.control_scaler, duration=args.duration
         )

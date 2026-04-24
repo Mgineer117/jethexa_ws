@@ -266,32 +266,33 @@ class Base:
 
     def check_valid_joint_angle(
         self, joint_angles: np.ndarray, terminate_on_invalid: bool = False
-    ) -> bool:
-        """Checks if the provided joint angles are within the defined limits."""
+    ) -> np.ndarray:
+        """Returns a (possibly clipped) copy of joint_angles within the joint limits."""
         if joint_angles.shape != (18,):
             rospy.logerr(
                 f"[Error]: Invalid joint angles shape: expected (18,), got {joint_angles.shape}"
             )
             raise ValueError("[Error]: Joint angles must be a 1D array of length 18.")
 
-        invalid_angles = np.logical_or(
-            joint_angles < JOINT_MIN.flatten(), joint_angles > JOINT_MAX.flatten()
-        )
+        # Copy so we never mutate a sensor buffer the caller may still hold.
+        joint_angles = np.array(joint_angles, copy=True)
+
+        # JOINT_MIN/MAX are 23-dim (base+attitude+joints); slice the joint block.
+        joint_lo = JOINT_MIN.flatten()[5:23]
+        joint_hi = JOINT_MAX.flatten()[5:23]
+        invalid_angles = np.logical_or(joint_angles < joint_lo, joint_angles > joint_hi)
         if np.any(invalid_angles):
             if terminate_on_invalid:
                 raise ValueError("[Error]: One or more joint angles are out of bounds.")
-            else:
-                joint_angles[invalid_angles] = np.clip(
-                    joint_angles[invalid_angles],
-                    JOINT_MIN.flatten()[invalid_angles],
-                    JOINT_MAX.flatten()[invalid_angles],
-                )
-                rospy.logwarn(
-                    "[Warning]: Out-of-bounds joint angles have been clipped to the nearest valid values."
-                )
-                return joint_angles
-        else:
-            return joint_angles
+            joint_angles[invalid_angles] = np.clip(
+                joint_angles[invalid_angles],
+                joint_lo[invalid_angles],
+                joint_hi[invalid_angles],
+            )
+            rospy.logwarn(
+                "[Warning]: Out-of-bounds joint angles have been clipped to the nearest valid values."
+            )
+        return joint_angles
 
     # ------------------------------------------------------------------
     # Control helpers

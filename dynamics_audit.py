@@ -516,8 +516,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--algo-name",      type=str,   default="ppo",
                         help="Policy to load: ppo | carl | c3m")
-    parser.add_argument("--control-scaler", type=float, default=0.1,
-                        help="Scales the policy's Δu output.")
+    parser.add_argument("--control-scaler", type=float, default=0.3,
+                        help="Scales the policy's Δu output. Must match env_config['u_scaler'].")
     parser.add_argument("--duration",       type=float, default=30.0,
                         help="Max audit duration in seconds.")
     parser.add_argument("--traj-path",      type=str,   default=None,
@@ -530,6 +530,7 @@ if __name__ == "__main__":
             algo_name=args.algo_name,
             traj_path=args.traj_path,
         )
+        auditor.initialize_robot_for_replay()
         auditor.run_audit(
             control_scaler=args.control_scaler,
             duration=args.duration,
