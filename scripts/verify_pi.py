@@ -13,6 +13,15 @@ Usage
 import argparse
 import os
 import sys
+from pathlib import Path
+
+# Resolve repo root and chdir there so "models/*.pth" and the
+# `from models.policy_networks import ...` import keep working after the
+# move into scripts/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 import matplotlib
 import matplotlib.pyplot as plt

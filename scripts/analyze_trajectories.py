@@ -14,6 +14,15 @@ Functionality:
 
 import glob
 import os
+import sys
+from pathlib import Path
+
+# Resolve repo root and chdir there so path strings like "hexapod_data"
+# keep working after this script was moved into scripts/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 import matplotlib.pyplot as plt
 import numpy as np

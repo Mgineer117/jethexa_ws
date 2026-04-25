@@ -1,7 +1,35 @@
 #!/usr/bin/env python3
+"""
+Trajectory data collector.
+
+Drives the robot through built-in velocity gait modes (`turning`, `accel`,
+`combined`) while recording, at every control tick:
+- base position and orientation from the Qualisys mocap stream
+- 18-DOF joint positions from /joint_states
+- estimated per-joint controls (finite-difference velocities)
+
+At the end of each run the recorded rollout is saved to hexapod_data/<ts>.npz
+and a quick PNG plot is dropped alongside it for visual sanity-checking.
+
+This script subscribes to /qualysis/jethexa, so qualysis.py must already
+be running in another terminal before launch.
+
+Example:
+    python scripts/generate_trajectory.py --mode turning --duration 33
+"""
+
 import argparse
 import os
+import sys
 import time
+from pathlib import Path
+
+# Resolve repo root and chdir there so "hexapod_data/" stays valid after
+# this script was moved into scripts/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 # Import matplotlib and set to headless mode for ROS execution
 import matplotlib

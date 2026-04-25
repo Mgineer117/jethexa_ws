@@ -219,22 +219,22 @@ Start the Qualisys bridge in a separate terminal on the PC:
 ```bash
 conda activate jethexa
 source devel/setup.bash
-python3 qualysis.py --marker_deck_name jethexa
+python3 scripts/qualysis.py --marker_deck_name jethexa
 ```
 
 This must be running before any mocap-dependent script can receive pose updates on the `qualysis/<marker_deck_name>` topic. If `qualysis.py` is not running, scripts that require motion-capture data will wait for that stream and never become ready.
 
-In this repository, `generate_trajectory.py` and `control_loop.py` both depend on that pose stream. `play_abs_traj.py` and `play_rel_traj.py` do not.
+In this repository, `scripts/generate_trajectory.py` and `scripts/control_loop.py` both depend on that pose stream. `scripts/play_abs_traj.py` and `scripts/play_rel_traj.py` do not.
 
 ### Then run the desired application
 
-Examples:
+All runnable PC-side scripts live in `scripts/`. Each one resolves the repo root from its own location, so you can launch them from anywhere — but the examples below assume you are at the repo root.
 
 ```bash
-python3 play_abs_traj.py
-python3 play_rel_traj.py
-python3 generate_trajectory.py --mode turning --duration 33
-python3 control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
+python3 scripts/play_abs_traj.py
+python3 scripts/play_rel_traj.py
+python3 scripts/generate_trajectory.py --mode turning --duration 33
+python3 scripts/control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
 ```
 
 ## Recovery and Reflashing
@@ -257,15 +257,29 @@ After reflashing, assume the robot has returned to the factory state. That means
 3. Manually start the robot ROS stack.
 4. Run `bash init.bash` again to reinstall the custom message and controller changes.
 
+## Repository Layout
+
+```
+jethexa_ws/
+├── scripts/         PC-side runnable scripts (control, playback, data collection, training, audit)
+├── figures/         Static plots and diagrams used in the docs
+├── models/          Trained policy networks (.pth) and the reference test trajectory
+├── hexapod_data/    Recorded rollouts and audit outputs (.npz / .png) — runtime data
+├── utils/           Debug and one-off data-cleaning helpers
+├── src/             ROS catkin packages (jethexa_controller, jethexa_controller_interfaces, jethexa_sdk)
+├── init.bash        One-shot deployment from PC to robot
+└── README.md
+```
+
 ## File Guide
 
-This section explains the main top-level files used in the workflow.
+This section explains the main files used in the workflow.
 
 ### `init.bash`
 
 Deployment script that pushes the custom ROS interface and controller code from the PC to the robot, rebuilds the robot workspace, and applies the Python 3 message compatibility patch.
 
-### `base.py`
+### `scripts/base.py`
 
 Shared support class used by the playback and control scripts. It:
 
@@ -277,7 +291,7 @@ Shared support class used by the playback and control scripts. It:
 - moves the robot to the initial pose before playback
 - returns the robot to the default pose at the end
 
-### `qualysis.py`
+### `scripts/qualysis.py`
 
 Bridge between the Qualisys motion-capture system and ROS. It connects to the Qualisys server, reads the rigid-body pose, and publishes it as a ROS `PoseStamped` message on:
 
@@ -287,7 +301,7 @@ qualysis/<marker_deck_name>
 
 Use this in a separate terminal whenever a script depends on mocap feedback. For example, `control_loop.py` enables `use_mocap=True`, so `qualysis.py` must already be running or the script will wait for that sensor stream.
 
-### `generate_trajectory.py`
+### `scripts/generate_trajectory.py`
 
 Collects robot motion data while commanding built-in velocity motions. It records:
 
@@ -305,7 +319,7 @@ Available collection modes:
 - `accel`
 - `combined`
 
-### `analyze_trajectories.py`
+### `scripts/analyze_trajectories.py`
 
 Loads the most recent `.npz` file in `hexapod_data/` and plots:
 
@@ -315,15 +329,15 @@ Loads the most recent `.npz` file in `hexapod_data/` and plots:
 
 Use this after data collection to inspect whether the recorded motion looks reasonable.
 
-### `play_abs_traj.py`
+### `scripts/play_abs_traj.py`
 
 Loads the test trajectory from `models/test_traj.npz`, extracts the absolute joint positions from the state vector, and replays them directly as 18-DOF joint targets. This is the most literal playback of a stored trajectory.
 
-### `play_rel_traj.py`
+### `scripts/play_rel_traj.py`
 
 Loads a stored trajectory, reads the `controls` array, integrates those controls over time, and converts them into virtual absolute joint targets before publishing them. Use this when you want playback based on the recorded joint increments/velocities rather than directly replaying stored absolute angles.
 
-### `control_loop.py`
+### `scripts/control_loop.py`
 
 Runs a learned policy during live execution. It:
 
@@ -335,6 +349,26 @@ Runs a learned policy during live execution. It:
 - saves the rollout back into `hexapod_data/`
 
 Because its configuration sets `use_mocap=True`, this script depends on the `qualysis.py` bridge being active if you want the base pose stream to be available.
+
+### `scripts/dynamics_audit.py`
+
+Safety-first audit tool for comparing the learned Jacobian dynamics model against the real robot during execution.
+
+It runs a control loop similar to `control_loop.py`, but tracks two trajectories in parallel:
+
+- the real robot trajectory from live sensor feedback
+- an approximate trajectory generated only by the learned dynamics model
+
+At each step it compares the model prediction against the real next state, prints a per-step error summary, and can pause for operator confirmation before continuing. This makes it useful for checking whether the learned model is trustworthy before relying on it more heavily.
+
+It also saves:
+
+- a compressed audit log in `hexapod_data/`
+- a one-step prediction error figure
+- a cumulative divergence figure
+- a 2-D XY trajectory comparison figure
+
+Because it uses mocap and live robot state, `qualysis.py` should be running first in a separate terminal.
 
 ## ROS Packages Added by This Repository
 
@@ -355,29 +389,35 @@ Contains the JetHexa SDK support code used by the controller stack.
 Collect a trajectory:
 
 ```bash
-python3 generate_trajectory.py --mode turning --duration 33
+python3 scripts/generate_trajectory.py --mode turning --duration 33
 ```
 
 Analyze the newest trajectory:
 
 ```bash
-python3 analyze_trajectories.py
+python3 scripts/analyze_trajectories.py
 ```
 
 Replay a stored absolute trajectory:
 
 ```bash
-python3 play_abs_traj.py
+python3 scripts/play_abs_traj.py
 ```
 
 Replay a stored relative/control-based trajectory:
 
 ```bash
-python3 play_rel_traj.py
+python3 scripts/play_rel_traj.py
 ```
 
 Run the learned controller:
 
 ```bash
-python3 control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
+python3 scripts/control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
+```
+
+Run the dynamics audit:
+
+```bash
+python3 scripts/dynamics_audit.py --algo-name carl --control-scaler 0.3 --duration 30
 ```

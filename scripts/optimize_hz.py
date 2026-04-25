@@ -1,9 +1,34 @@
 #!/usr/bin/env python3
-import rospy
-import numpy as np
+"""
+Network and command-latency diagnostic for the PC <-> robot link.
+
+Measures two things while connected to the robot:
+1. Inter-arrival jitter of incoming /imu/filtered messages, to estimate
+   how stable the wireless ROS link is.
+2. End-to-end response latency: publishes a small /cmd_vel pulse and
+   times how long it takes for /joint_states to reflect the resulting
+   motion.
+
+Use this to pick a safe control rate for control_loop.py before relying
+on the network. No data files are produced; results are printed.
+"""
+
+import os
+import sys
 import time
-from sensor_msgs.msg import Imu, JointState
+from pathlib import Path
+
+# Keep imports consistent with the other scripts: chdir to repo root so
+# any relative paths used inside this folder still resolve.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
+
+import numpy as np
+import rospy
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Imu, JointState
 
 
 class JetHexaDiagnostic:

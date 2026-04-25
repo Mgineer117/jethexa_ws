@@ -1,5 +1,28 @@
+"""
+Offline training of the learned Jacobian dynamics model.
+
+Reads every valid rollout under hexapod_data/, builds a (state, control,
+state_dot) dataset via finite differences, and fits a small neural net
+that predicts state derivatives from the current state + control. The
+trained weights are written to J_varpi_weights.pth (and a *_best.pth
+copy for the best validation epoch); training-curve and one-step
+prediction plots are saved alongside.
+
+This is the data side of the pipeline that produces the network used by
+dynamics_audit.py at run time.
+"""
+
 import glob
 import os
+import sys
+from pathlib import Path
+
+# Resolve repo root and chdir there so "hexapod_data" and the .pth output
+# paths stay valid after this script was moved into scripts/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 import matplotlib.pyplot as plt
 import numpy as np

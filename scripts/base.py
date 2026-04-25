@@ -1,3 +1,23 @@
+"""
+Shared base class and joint-limit constants used by the playback and live
+control scripts in this folder.
+
+Responsibilities of `Base`:
+- subscribe to /joint_states, /imu/filtered, and /qualysis/<deck> as configured
+- publish absolute or relative joint commands on /jethexa_controller/...
+- load a reference trajectory (most-recent .npz from hexapod_data/, or
+  models/test_traj.npz) and expose it as `self.test_data`
+- block until required sensor topics are publishing
+- enforce the JOINT_MIN / JOINT_MAX bounds defined here
+- move the robot to INIT_JOINT_POS before playback and back to a safe
+  default pose at shutdown
+
+This file is a library, not an entry point. Relative paths inside it
+(`hexapod_data`, `models/test_traj.npz`) resolve against the current
+working directory; the runnable scripts in this folder chdir to the repo
+root at startup so those paths stay valid after the reorganization.
+"""
+
 import glob
 import os
 

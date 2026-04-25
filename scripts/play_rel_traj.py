@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """
-JET-HEXA ABSOLUTE TRAJECTORY PLAYBACK (SIMULTANEOUS 18-DOF MODE)
+JET-HEXA TRAJECTORY PLAYBACK (INTEGRATED VIRTUAL ABSOLUTE MODE)
 ----------------------------
 Functionality:
 1. Finds the most recent .npz/.npy data file.
-2. Extracts the 18-DOF absolute joint targets from the state vector.
-3. Publishes all 18 joint targets simultaneously to the robot.
+2. Extracts the 18-DOF joint controls (velocities/deltas).
+3. Integrates controls from the initial position to calculate virtual absolute targets.
+4. Publishes all 18 absolute joint targets simultaneously to the robot.
 """
+
+import os
+import sys
+from pathlib import Path
+
+# Resolve repo root and chdir there so "models/test_traj.npz" and the
+# `from base import Base` import keep working after the move into scripts/.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 import numpy as np
 import rospy
@@ -25,32 +37,31 @@ config = {
 }
 
 
-class JetHexaAbsolutePlayer(Base):
-    def __init__(
-        self,
-    ):
-        rospy.init_node("jethexa_abs_player", anonymous=True)
+class JetHexaTrajectoryPlayer(Base):
+    def __init__(self):
+        rospy.init_node("jethexa_trajectory_player", anonymous=True)
         super().__init__(config=config)
 
     def play_trajectory(self):
-        abs_joint_targets = self.test_data["states"][:, 6:24]
-        total_steps = len(abs_joint_targets)
+        joint_angles = self.test_data["states"][:, 6:24]
+        joint_controls = self.test_data["controls"]
+        joint_deltas = joint_controls * self.dt
+        total_steps = len(joint_controls)
 
-        # Execution Loop
+        # Start exactly at states[0], matching the plot
+        target_joint_pos = np.array(joint_angles[0], dtype=float)
+
         rospy.loginfo(f"[INFO]: Playing Trajectory with {total_steps} execution steps.")
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
 
-            target_joint_pos = abs_joint_targets[i]
-            target_joint_pos = self.check_valid_joint_angle(
-                target_joint_pos, terminate_on_invalid=False
-            )
-            target_joint_pos = target_joint_pos.tolist()
+            # 2. Then integrate using controls[i+1] for next step
+            target_joint_pos += joint_deltas[i]
 
-            # --- Move ALL 18 joints simultaneously ---
+            # 1. Publish current target FIRST (at i=0, publishes states[0])
             msg = JointCommand()
-            msg.target = target_joint_pos
+            msg.target = target_joint_pos.tolist()
             msg.duration = self.duration
 
             # Keep publishing and checking until the error is within the threshold
@@ -60,9 +71,7 @@ class JetHexaAbsolutePlayer(Base):
                 self.rate.sleep()
 
                 sq_error = np.sum((self.joint_pos - target_joint_pos) ** 2)
-                if (
-                    j % 5 == 0 and sq_error > 0
-                ):  # Log every 5 iterations to avoid spamming
+                if j % 5 == 0:  # Log every 5 iterations to avoid spamming
                     rospy.loginfo(
                         f"[INFO] Moving robot {j}... Squared joint error: {sq_error:.6f}"
                     )
@@ -75,12 +84,12 @@ class JetHexaAbsolutePlayer(Base):
                     f"[INFO]: Executing step {(i/total_steps)*100:.1f}% Complete."
                 )
 
-        rospy.loginfo("[INFO]: Absolute Playback complete.")
+        rospy.loginfo("[INFO]: Integrated Virtual Absolute Playback complete.")
 
 
 if __name__ == "__main__":
     try:
-        player = JetHexaAbsolutePlayer()
+        player = JetHexaTrajectoryPlayer()
         player.initialize_robot_for_replay()
         player.play_trajectory()
         player.stop_robot()

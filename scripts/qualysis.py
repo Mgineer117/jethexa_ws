@@ -12,16 +12,38 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+Qualisys -> ROS pose bridge.
+
+Connects to a Qualisys motion-capture server over qtm_rt, subscribes to a
+named rigid body (`--marker_deck_name`), and republishes its 6-DOF pose
+as a geometry_msgs/PoseStamped on /qualysis/<marker_deck_name>.
+
+Any script in this repo that needs torso pose feedback (control_loop.py,
+generate_trajectory.py, dynamics_audit.py) listens on that topic, so this
+bridge has to be running first or those scripts will block waiting for
+the stream.
+
+Adapted from
+https://github.com/tbretl/crazyflie-client/blob/main/ae483clients.py
+"""
 
 import argparse
 import asyncio
+import os
+import sys
 import xml.etree.cElementTree as ET
+from pathlib import Path
 from threading import Thread
+
+# Keep cwd consistent with the rest of the scripts in this folder.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+os.chdir(_REPO_ROOT)
 
 import numpy as np
 import qtm_rt as qtm
-
-# code heavily adapted from https://github.com/tbretl/crazyflie-client/blob/main/ae483clients.py
 import rospy
 from geometry_msgs.msg import PoseStamped
 from scipy.spatial.transform import Rotation

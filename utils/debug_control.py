@@ -1,4 +1,15 @@
 #!/usr/bin/env python3
+"""
+Bring-up sanity check for the relative-joint command path.
+
+Publishes small random JointCommand offsets on
+/jethexa_controller/set_joints_relative, alternating between the two
+tripod groups so the robot wiggles in place. Use it to confirm the
+custom JointCommand interface is reachable from the PC and that the
+robot is responding before running any of the real playback or control
+scripts.
+"""
+
 import random
 
 import rospy

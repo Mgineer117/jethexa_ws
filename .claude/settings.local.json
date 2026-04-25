@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(python3 -c \"import numpy as np; d = np.load\\('models/test_traj.npz'\\); print\\(list\\(d.keys\\(\\)\\)\\); print\\({k: d[k].shape for k in d}\\)\")",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(git mv *)",
+      "Read(//c/Conda/anaconda3/envs/class/**)",
+      "Read(//c/Conda/anaconda3/envs//**)"
     ]
   }
 }
