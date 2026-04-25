@@ -1,77 +1,87 @@
-# JetHexa Hardware Integration Guide
+# JetHexa Robot Setup and Operation Guide
 
-**Minjae Cho** · Aerospace Engineering, UIUC · March 2026
+This repository contains the PC-side workspace and custom ROS interfaces used to control a JetHexa robot from an external Linux machine. It also includes data collection, trajectory playback, and motion-capture integration utilities.
 
----
+The goal of this guide is to document the setup in the order it should be completed, explain the purpose of the important files, and make recovery easier when the robot image becomes corrupted.
 
 ## Overview
 
-The JetHexa robot ships with pre-installed software and a custom ROS environment developed by Hiwonder. This default configuration facilitates immediate, out-of-the-box operation via user-friendly interfaces, such as the NoMachine remote desktop application and a proprietary mobile app.
+The default JetHexa software image is designed for the manufacturer's workflow. That works well for basic operation, but it is not ideal when you want a separate Linux PC to act as the main controller and send low-level joint commands over ROS.
 
-While this configuration is advantageous for high-level control — where the system internally handles the inverse kinematics solvers — it restricts direct, low-level communication between a centralized Linux computer and the robot's hardware. Establishing a manual, bidirectional communication framework requires several system modifications. The following section outlines this setup procedure.
+This repository adds that workflow by:
 
----
+1. Building a ROS workspace on the PC.
+2. Reconfiguring the robot so its ROS master is reachable over Wi-Fi.
+3. Installing the custom `JointCommand` interface and updated controller code onto the robot.
+4. Running playback, collection, and control scripts from the PC.
 
-## 1. Setup
+## System Layout
 
-### 1.1 PC Setup
+- PC: runs this repository, user scripts, trajectory tools, and optionally the Qualisys bridge.
+- Robot: runs the JetHexa ROS stack and executes joint commands.
+- Qualisys motion capture system: optional, but required for scripts that use torso pose feedback from mocap.
 
-The centralized PC acts as the high-level controller. Clone this repository to get started:
+## Setup Order
+
+Complete the following sections in order.
+
+### 1. Clone the Workspace on the PC
+
 ```bash
 git clone https://github.com/Mgineer117/jethexa_ws
 cd jethexa_ws
 ```
 
-#### Installing Conda
+### 2. Install Conda on the PC
 
-> Skip this section if you already have Conda installed on the PC.
+Skip this section if Conda is already installed.
 
-To install the Miniconda package manager, execute:
 ```bash
 wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
-bash ~/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
 source ~/.bashrc
 ```
 
-#### Installing ROS
+### 3. Create the Software Environment
 
-Once Conda is installed, create and activate the dedicated environment for the JetHexa project, then configure the required channels for RoboStack before installing the dependencies:
+Create the Conda environment and install the ROS and Python dependencies used by this workspace.
+
 ```bash
 conda create -n jethexa python=3.9.18 -y
 conda activate jethexa
-
-# Install essential ROS desktop and necessary build tools
 conda install ros-noetic-ros-base ros-noetic-catkin catkin_tools -c robostack-staging -c conda-forge
-
-pip install scipy qtm-rt
-
+pip install scipy qtm-rt matplotlib numpy torch
 ```
 
-This setup ensures that your Python virtual environment is isolated and pre-configured with the necessary ROS libraries.
+Verify the installation:
 
-To verify that the environment is correctly sourcing ROS and recognizes the Python interpreter, run:
 ```bash
 roscore -h
 python3 -c "import rospy; print('ROS Python Bridge: Success')"
 ```
 
-If the first command returns the help manual for the ROS Master and the second prints the success message, your PC is ready to interface with the robot.
+### 4. Build the PC Workspace
 
-Finally, initialize and build the ROS workspace:
+From the repository root:
+
 ```bash
-# Initialize and build the workspace
+conda activate jethexa
 catkin_make -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+source devel/setup.bash
 ```
 
-#### Communication Setup
+### 5. Connect the PC to the Robot Network
 
-Connect the PC to the robot's hotspot and export the network variables. Identify your local IP via `hostname -I`, then run:
+Connect the PC to the robot hotspot. The JetHexa hotspot usually looks like `HW_***` and the default password is `hiwonder`.
+
+Set the ROS networking variables on the PC:
+
 ```bash
 export ROS_MASTER_URI=http://192.168.149.1:11311
 export ROS_IP=<your_pc_ip>
 ```
 
-Then run:
+Then source the environment:
 
 ```bash
 source ~/.bashrc
@@ -79,95 +89,295 @@ conda activate jethexa
 source devel/setup.bash
 ```
 
----
+You can get the PC IP with:
 
-### 1.2 Robot Setup
+```bash
+hostname -I
+```
 
-By default, the robot's operating system is configured to execute a `ros_bringup` script upon booting, which automatically initializes the core ROS nodes. However, this creates a significant network partition when attempting to bypass the manufacturer's recommended interfaces to command the robot from a centralized computer.
+## Robot Setup
 
-Specifically, the robot initializes its ROS master **before** establishing its Wi-Fi hotspot. Consequently, the ROS master binds to `localhost` (127.0.0.1) rather than the exposed network IP, effectively isolating the robot and preventing external machines from communicating with its ROS graph.
+These steps configure the robot so the ROS graph is reachable from the PC.
 
-#### Step 1 — Disable Auto-Start Services
+### 6. Disable the Default Auto-Start Service
 
-Disable the auto-starting behavior using the systemd service manager by executing the following on the robot's terminal:
+By default the robot launches its ROS stack too early during boot, before networking is fully ready. That can cause the ROS master to bind incorrectly and become unreachable from the PC.
+
+Run these commands on the robot:
+
 ```bash
 sudo systemctl stop jethexa_bringup.service
 sudo systemctl disable jethexa_bringup.service
 ```
 
-These commands immediately terminate the active ROS background processes and prevent the daemon from initializing on subsequent boots. If necessary, this can be reversed by running:
+If you ever need to restore the original behavior:
+
 ```bash
 sudo systemctl enable jethexa_bringup.service
 ```
 
-or by reflashing the SD card with the original factory image.
+### 7. Fix the Robot ROS Networking Configuration
 
-#### Step 2 — Reconfigure Network Variables
+SSH into the robot after connecting to its hotspot:
 
-The robot can be accessed physically via an attached monitor and keyboard, or remotely via SSH. To use SSH, connect to the robot's Wi-Fi hotspot and log in:
+```bash
+ssh hiwonder@192.168.149.1
+```
 
-| Field        | Value                       |
-|--------------|-----------------------------|
-| SSID         | `HW_***`                    |
-| Password     | `hiwonder`                  |
-| SSH          | `ssh hiwonder@<gateway_ip>` |
-| SSH Password | `hiwonder`                  |
+Default credentials:
 
-Once connected, locate and edit the `.hiwonderrc` hidden file, which manages the ROS environment variables. To ensure the ROS master binds to the exposed Wi-Fi IP address rather than the local loopback, uncomment the following lines:
+- Username: `hiwonder`
+- Password: `hiwonder`
+
+Edit the robot's hidden ROS environment configuration and enable automatic hostname/master URI setup in `.hiwonderrc`:
+
 ```bash
 AUTO_ROS_HOSTNAME=true
 AUTO_ROS_MASTER_URI=true
 ```
 
-#### Step 3 — Manual ROS Bringup
+After changing this file, reboot the robot or restart the shell session so the updated configuration takes effect.
 
-After rebooting, the robot will no longer automatically start its ROS controllers — the leg servos will remain unpowered and the robot will not stand. To manually initialize the ROS environment and expose the hardware interface to the network, run:
+### 8. Manually Start the Robot ROS Stack
+
+After disabling the service, the robot will not stand up automatically at boot. Start its base stack manually:
+
 ```bash
 roslaunch jethexa_bringup base.launch
 ```
 
-Upon successful execution, the robot will engage its servos and assume its default standing posture, ready to receive external commands over the network.
+If your workflow uses the IMU, also run:
 
-#### Step 4 — Initialize Custom Joint Control
+```bash
+roslaunch jethexa_peripherals imu.launch
+```
 
-The original JetHexa framework only provides a high-level control interface. This repository introduces a new ROS topic enabling **independent per-joint control**. The relevant source files are located in:
+At this point the robot should power the servos and move into its default standing posture.
 
-- `src/jethexa_controller`
-- `src/jethexa_controller_interfaces`
+### 9. Deploy the Custom Interface and Controller
 
-Run the provided initialization script to copy these files to the robot and trigger a ROS rebuild:
+This repository includes a custom `JointCommand` message and modified controller code so the PC can publish direct joint targets.
+
+Run:
+
 ```bash
 bash init.bash
 ```
 
-The JetHexa's custom messages (e.g., `JointCommand`) are compiled for Python 2.7 by default. To allow Python 3 scripts to control the robot hardware, the compiled Python 3 message definitions must be manually moved into the active path:
-```bash
-# Define paths for the compiled Python 3 source and the active target directory
-SOURCE_PY=~/jethexa/devel/.private/jethexa_controller_interfaces/lib/python3/dist-packages/jethexa_controller_interfaces/msg/_JointCommand.py
-TARGET_DIR=~/jethexa/devel/lib/python2.7/dist-packages/jethexa_controller_interfaces/msg/
+This script is important and does several things in order:
 
-# Copy the definition and update the package initialization
-cp $SOURCE_PY $TARGET_DIR/
-echo "from ._JointCommand import *" >> $TARGET_DIR/__init__.py
+1. Assumes the local workspace source tree is at `$HOME/jethexa_ws/src`.
+2. Finds the local `jethexa_controller_interfaces` package.
+3. Finds the local `jethexa_controller_main.py` controller script.
+4. Copies `JointCommand.msg`, `CMakeLists.txt`, and `package.xml` to the robot.
+5. Copies the updated controller script to the robot.
+6. SSHes into the robot and rebuilds the relevant ROS packages with `catkin build`.
+7. Refreshes the ROS package index with `rospack profile`.
+8. Copies the generated Python 3 `_JointCommand.py` file into the robot's active Python 2.7 ROS message path.
+9. Appends `from ._JointCommand import *` to the target `__init__.py` if needed.
+
+That last patch is required because the robot image is based on ROS Melodic and the default message path used by the running system is still tied to Python 2.7, while these scripts run in Python 3 on the PC side.
+
+Important note: `init.bash` currently assumes the repository lives at `~/jethexa_ws` on the PC. If your local workspace is elsewhere, update the `LOCAL_WS` path inside `init.bash` before running it.
+
+### 10. Verify the Custom Message is Visible
+
+From the PC:
+
+```bash
+rosmsg show jethexa_controller_interfaces/JointCommand
 ```
 
----
+If it returns the `target` array and `duration` field, the message bridge is working.
 
-## 2. Operation
+## Daily Startup Order
 
-### 2.1 Start the Robot
+Once the one-time setup is finished, this is the normal bring-up sequence.
 
-To initialize the system, launch the base controllers on the robot:
+### Basic robot bring-up
+
+On the robot:
+
 ```bash
 roslaunch jethexa_bringup base.launch
 roslaunch jethexa_peripherals imu.launch
 ```
 
-### 2.2 Verify Connection
+On the PC:
 
-Once the robot is standing, verify the connection from the PC by checking that the custom message type is recognized:
 ```bash
-rosmsg show jethexa_controller_interfaces/JointCommand
+conda activate jethexa
+source devel/setup.bash
+export ROS_MASTER_URI=http://192.168.149.1:11311
+export ROS_IP=<your_pc_ip>
 ```
 
-If the terminal returns the `float32[18] target` structure, the bidirectional bridge is fully established.
+### If using Qualisys mocap
+
+Start the Qualisys bridge in a separate terminal on the PC:
+
+```bash
+conda activate jethexa
+source devel/setup.bash
+python3 qualysis.py --marker_deck_name jethexa
+```
+
+This must be running before any mocap-dependent script can receive pose updates on the `qualysis/<marker_deck_name>` topic. If `qualysis.py` is not running, scripts that require motion-capture data will wait for that stream and never become ready.
+
+In this repository, `generate_trajectory.py` and `control_loop.py` both depend on that pose stream. `play_abs_traj.py` and `play_rel_traj.py` do not.
+
+### Then run the desired application
+
+Examples:
+
+```bash
+python3 play_abs_traj.py
+python3 play_rel_traj.py
+python3 generate_trajectory.py --mode turning --duration 33
+python3 control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
+```
+
+## Recovery and Reflashing
+
+Sometimes the robot image gets corrupted and the robot will no longer boot or behave correctly. In practice people often describe this as the robot firmware being broken, even though the recovery is usually just restoring the SD card image.
+
+The recovery procedure is straightforward:
+
+1. Power off the robot.
+2. Remove the SD card from the robot.
+3. Format the SD card.
+4. Reinstall the operating system image provided by the manufacturer.
+5. Reinsert the SD card and boot the robot.
+6. Repeat the robot setup steps in this README.
+
+After reflashing, assume the robot has returned to the factory state. That means you will usually need to:
+
+1. Disable `jethexa_bringup.service` again.
+2. Reapply the `.hiwonderrc` network configuration.
+3. Manually start the robot ROS stack.
+4. Run `bash init.bash` again to reinstall the custom message and controller changes.
+
+## File Guide
+
+This section explains the main top-level files used in the workflow.
+
+### `init.bash`
+
+Deployment script that pushes the custom ROS interface and controller code from the PC to the robot, rebuilds the robot workspace, and applies the Python 3 message compatibility patch.
+
+### `base.py`
+
+Shared support class used by the playback and control scripts. It:
+
+- subscribes to joint states, IMU, and mocap topics depending on configuration
+- publishes absolute or relative joint commands
+- loads trajectory files
+- waits for required sensors to become ready
+- checks joint limits
+- moves the robot to the initial pose before playback
+- returns the robot to the default pose at the end
+
+### `qualysis.py`
+
+Bridge between the Qualisys motion-capture system and ROS. It connects to the Qualisys server, reads the rigid-body pose, and publishes it as a ROS `PoseStamped` message on:
+
+```bash
+qualysis/<marker_deck_name>
+```
+
+Use this in a separate terminal whenever a script depends on mocap feedback. For example, `control_loop.py` enables `use_mocap=True`, so `qualysis.py` must already be running or the script will wait for that sensor stream.
+
+### `generate_trajectory.py`
+
+Collects robot motion data while commanding built-in velocity motions. It records:
+
+- base position and orientation
+- joint positions
+- estimated joint controls
+
+It saves the result to `hexapod_data/*.npz` and also writes a trajectory plot as a `.png`.
+
+This script subscribes to `/qualysis/jethexa` for torso pose, so run `qualysis.py` first in a separate terminal.
+
+Available collection modes:
+
+- `turning`
+- `accel`
+- `combined`
+
+### `analyze_trajectories.py`
+
+Loads the most recent `.npz` file in `hexapod_data/` and plots:
+
+- torso position
+- torso orientation
+- all 18 joint trajectories
+
+Use this after data collection to inspect whether the recorded motion looks reasonable.
+
+### `play_abs_traj.py`
+
+Loads the test trajectory from `models/test_traj.npz`, extracts the absolute joint positions from the state vector, and replays them directly as 18-DOF joint targets. This is the most literal playback of a stored trajectory.
+
+### `play_rel_traj.py`
+
+Loads a stored trajectory, reads the `controls` array, integrates those controls over time, and converts them into virtual absolute joint targets before publishing them. Use this when you want playback based on the recorded joint increments/velocities rather than directly replaying stored absolute angles.
+
+### `control_loop.py`
+
+Runs a learned policy during live execution. It:
+
+- loads a policy network from `models/`
+- loads a reference trajectory from `models/test_traj.npz`
+- reads the current robot state
+- computes corrective joint actions
+- publishes the resulting absolute joint targets
+- saves the rollout back into `hexapod_data/`
+
+Because its configuration sets `use_mocap=True`, this script depends on the `qualysis.py` bridge being active if you want the base pose stream to be available.
+
+## ROS Packages Added by This Repository
+
+### `src/jethexa_controller_interfaces`
+
+Defines the custom ROS messages and services, including `JointCommand.msg`.
+
+### `src/jethexa_controller`
+
+Contains the custom controller logic and scripts used to expose lower-level joint control on the robot.
+
+### `src/jethexa_sdk`
+
+Contains the JetHexa SDK support code used by the controller stack.
+
+## Typical Commands
+
+Collect a trajectory:
+
+```bash
+python3 generate_trajectory.py --mode turning --duration 33
+```
+
+Analyze the newest trajectory:
+
+```bash
+python3 analyze_trajectories.py
+```
+
+Replay a stored absolute trajectory:
+
+```bash
+python3 play_abs_traj.py
+```
+
+Replay a stored relative/control-based trajectory:
+
+```bash
+python3 play_rel_traj.py
+```
+
+Run the learned controller:
+
+```bash
+python3 control_loop.py --algo-name ppo --control-scaler 0.3 --duration 33
+```
