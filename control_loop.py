@@ -99,12 +99,9 @@ class JetHexaRLCollector(Base):
 
             # delta = u * self.dt
             target_joint_pos = joint_pos + u * self.dt
-<<<<<<< HEAD
             target_joint_pos = self.check_valid_joint_angle(
                 target_joint_pos, terminate_on_invalid=False
             )
-=======
->>>>>>> a97c6ab (asdwqe)
 
             # 1. Publish current target FIRST (at i=0, publishes states[0])
             msg = JointCommand()
@@ -157,10 +154,10 @@ if __name__ == "__main__":
 
     try:
         collector = JetHexaRLCollector(algo_name=args.algo_name)
-        collector.initialize_robot_for_replay()
-        collector.run_rollout(
-            control_scaler=args.control_scaler, duration=args.duration
-        )
+        # collector.initialize_robot_for_replay()
+        # collector.run_rollout(
+        #     control_scaler=args.control_scaler, duration=args.duration
+        # )
         collector.stop_robot()
     except rospy.ROSInterruptException:
         pass

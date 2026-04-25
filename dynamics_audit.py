@@ -36,26 +36,29 @@ import time
 from typing import Optional
 
 import matplotlib
+
 matplotlib.use("Agg")  # swap to "TkAgg" if you have a live display
 import matplotlib.pyplot as plt
 import numpy as np
+import rospy
 import torch
 import torch.nn as nn
-import rospy
 
-from base import Base
+from base import INIT_JOINT_POS, Base
 from jethexa_controller_interfaces.msg import JointCommand
 from models.policy_networks import CLActor
 
 # ─── State/control dimensions ─────────────────────────────────────────────────
 X_DIM = 23
 U_DIM = 18
-ATTITUDE_IDX = [2, 3, 4]   # phi, theta, psi – wrap-aware difference
+ATTITUDE_IDX = [2, 3, 4]  # phi, theta, psi – wrap-aware difference
 
-STATE_LABELS = (
-    ["px", "py", "phi", "theta", "psi"]
-    + [f"q{i+1}" for i in range(18)]
-)
+# Must match env_config["decimation"] in the simulator.
+# The same control u is held for DECIMATION Euler sub-steps of dt/DECIMATION,
+# which is how get_transition() integrates the dynamics during training.
+DECIMATION = 2
+
+STATE_LABELS = ["px", "py", "phi", "theta", "psi"] + [f"q{i+1}" for i in range(18)]
 
 
 # ─── Jacobian dynamics model ──────────────────────────────────────────────────
@@ -71,8 +74,10 @@ class HexapodDynamics(nn.Module):
         nn_input_dim = X_DIM + len(ATTITUDE_IDX)  # angle-encoded input
 
         self.jacobian_net = nn.Sequential(
-            nn.Linear(nn_input_dim, 64), nn.Tanh(),
-            nn.Linear(64, 64),           nn.Tanh(),
+            nn.Linear(nn_input_dim, 64),
+            nn.Tanh(),
+            nn.Linear(64, 64),
+            nn.Tanh(),
             nn.Linear(64, 5 * U_DIM),
         )
         self.jacobian_net.load_state_dict(
@@ -86,7 +91,7 @@ class HexapodDynamics(nn.Module):
         for idx in ATTITUDE_IDX:
             if cur < idx:
                 parts.append(x[:, cur:idx])
-            theta = x[:, idx: idx + 1]
+            theta = x[:, idx : idx + 1]
             parts += [torch.cos(theta), torch.sin(theta)]
             cur = idx + 1
         if cur < x.shape[1]:
@@ -104,14 +109,28 @@ class HexapodDynamics(nn.Module):
 
 
 # ─── Dynamics helpers ─────────────────────────────────────────────────────────
-def model_step(x: np.ndarray, u: np.ndarray, Jb: np.ndarray, dt: float) -> np.ndarray:
+def model_step(
+    x: np.ndarray,
+    u: np.ndarray,
+    dyn: "HexapodDynamics",
+    dt: float,
+    decimation: int = DECIMATION,
+) -> np.ndarray:
     """
-    Euler integration of the control-affine system:
-        x_next = x + dt * B(x) @ u
-    where B = [Jb (5×18); I_18] giving the 23-dim next state.
+    Euler integration matching the simulator's get_transition():
+        for each sub-step:
+            Jb   = dyn(x)          # recompute at current x
+            B    = [Jb; I_18]
+            x   += dt_sub * B @ clip(u, ±4)
+    Re-evaluating Jb at each sub-step is important when decimation > 1
+    because B(x) changes as the joints move.
     """
-    B = np.vstack([Jb, np.eye(U_DIM, dtype=np.float32)])  # (23, 18)
-    return x + dt * (B @ u)
+    dt_sub = dt / decimation
+    for _ in range(decimation):
+        Jb = dyn(x).detach().cpu().numpy().squeeze(0)  # (5, 18)
+        B = np.vstack([Jb, np.eye(U_DIM, dtype=np.float32)])  # (23, 18)
+        x = x + dt_sub * (B @ np.clip(u, -4.0, 4.0))
+    return x
 
 
 def angle_diff(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -148,12 +167,14 @@ class DynamicsAuditor(Base):
     # ── policy ────────────────────────────────────────────────────────────────
     def _load_policy(self, algo_name: str) -> CLActor:
         table = {
-            "ppo":  ("models/ppo.pth",  "stochastic"),
+            "ppo": ("models/ppo.pth", "deterministic"),
             "carl": ("models/carl.pth", "deterministic"),
-            "c3m":  ("models/c3m.pth",  "deterministic"),
+            "c3m": ("models/c3m.pth", "deterministic"),
         }
         if algo_name not in table:
-            raise ValueError(f"Unknown algorithm '{algo_name}'. Choose: ppo, carl, c3m.")
+            raise ValueError(
+                f"Unknown algorithm '{algo_name}'. Choose: ppo, carl, c3m."
+            )
         path, mode = table[algo_name]
         if not os.path.exists(path):
             sys.exit(f"[ERROR] Policy weights not found: {path}")
@@ -173,12 +194,33 @@ class DynamicsAuditor(Base):
         else:
             data = self.test_data
 
-        xref = data["states"]
-        if xref.shape[1] == 24:          # strip p_z if present
-            xref = np.delete(xref, 2, axis=1)
-        xref = xref[-300:]
-        uref = data["controls"][-300:]
-        assert xref.shape == (300, X_DIM), f"Unexpected xref shape {xref.shape}"
+        xref_full = data["states"]
+        uref_full = data["controls"]
+        if xref_full.shape[1] == 24:  # strip p_z if present
+            xref_full = np.delete(xref_full, 2, axis=1)
+
+        # Align reference to the robot's current XY position so the audit
+        # starts within the training perturbation bound (±0.30 m).
+        # Without this, a fixed xref[-300:] can start 0.3-0.5 m away,
+        # immediately pushing the C3M controller out of its contraction region.
+        robot_xy = np.array([self.base_pos[0], self.base_pos[1]])
+        dists = np.linalg.norm(xref_full[:, :2] - robot_xy, axis=1)
+        start_idx = int(np.argmin(dists))
+        end_idx = min(start_idx + 300, len(xref_full))
+        n = end_idx - start_idx
+
+        xref = xref_full[start_idx:end_idx]
+        uref = uref_full[start_idx:end_idx]
+
+        rospy.loginfo(
+            f"[AUDIT] Ref aligned: closest point = index {start_idx} "
+            f"(dist={dists[start_idx]:.3f} m), using {n} steps."
+        )
+
+        if n < 300:
+            rospy.logwarn(f"[AUDIT] Only {n} reference steps available from alignment point.")
+
+        assert xref.shape[1] == X_DIM, f"Unexpected xref shape {xref.shape}"
         return xref, uref
 
     # ── policy query ──────────────────────────────────────────────────────────
@@ -189,8 +231,16 @@ class DynamicsAuditor(Base):
         uref_t: np.ndarray,
         scaler: float,
     ) -> np.ndarray:
+        # Wrap-correct attitude angles in xref_t to be on the same ±π side as x.
+        # Without this, whenever the reference crosses ±π (e.g. yaw flips from
+        # +179° to -179°) while the robot hasn't yet, e[psi] = ±2π saturates
+        # the C3M tanh and fires maximum joint commands.
+        xref_aligned = xref_t.copy()
+        for idx in ATTITUDE_IDX:
+            xref_aligned[idx] += np.round((x[idx] - xref_t[idx]) / (2 * np.pi)) * 2 * np.pi
+
         obs = torch.from_numpy(
-            np.concatenate([x, xref_t, uref_t]).astype(np.float32)
+            np.concatenate([x, xref_aligned, uref_t]).astype(np.float32)
         ).unsqueeze(0)
         with torch.no_grad():
             du, _ = self.policy(obs)
@@ -226,23 +276,57 @@ class DynamicsAuditor(Base):
         print(f"  Joints (5-22) max abs: {np.max(np.abs(one_step_err[5:])):.4f}")
         print(f"{sep}")
 
+    # ── initial state ─────────────────────────────────────────────────────────
+    def _make_x0(self) -> np.ndarray:
+        x0 = np.zeros(X_DIM)
+        x0[0] = self.base_pos[0]  # px  (mocap)
+        x0[1] = self.base_pos[1]  # py  (mocap)
+        x0[2] = self.base_attitude[0]  # phi   (mocap)
+        x0[3] = self.base_attitude[1]  # theta (mocap)
+        x0[4] = self.base_attitude[2]  # psi   (mocap)
+        x0[5:] = INIT_JOINT_POS
+        return x0
+
     # ── main loop ─────────────────────────────────────────────────────────────
-    def run_audit(self, control_scaler: float, duration: float = 30.0):
+    def run_audit(
+        self, control_scaler: float, duration: float = 30.0, decision_interval: int = 1
+    ):
+        # Wait for subscriber callbacks to deliver a fresh reading.
+        # Without this, base_pos/base_attitude captured during __init__ (before
+        # model loading completes) are used for both ref alignment and x0.
+        rospy.sleep(0.3)
+        rospy.loginfo(
+            f"[AUDIT] Initial mocap: pos=({self.base_pos[0]:.3f}, {self.base_pos[1]:.3f})  "
+            f"yaw={np.degrees(self.base_attitude[2]):.1f}°"
+        )
+
         xref, uref = self._load_ref_traj()
         total_steps = min(len(xref), int(duration / self.dt))
 
-        # log buffers
-        real_log      = []   # real states  (N, 23)
-        approx_log    = []   # approx states (N, 23)
-        one_step_errs = []   # x_real_next – x_model_pred  (N, 23)
+        if total_steps < 10:
+            rospy.logerr(
+                f"[AUDIT] Only {total_steps} reference steps after alignment — "
+                "robot is likely outside the trajectory. Aborting."
+            )
+            return
 
-        # both trajectories start at the current real state
-        x_real   = np.concatenate([self.base_pos, self.base_attitude, self.joint_pos])
-        x_approx = x_real.copy()
+        # log buffers
+        real_log = []  # real states  (N, 23)
+        approx_log = []  # approx states (N, 23)
+        one_step_errs = []  # x_real_next – x_model_pred  (N, 23)
+
+        # base from mocap, joints pinned to standing pose so the audit starts
+        # from a known configuration regardless of where the robot actually is
+        x_real = self._make_x0()
+        # APPROX starts at xref[0] — the point where the C3M contraction guarantee
+        # holds. Starting elsewhere (e.g. x_real) causes large initial error e=x-xref
+        # which saturates the tanh and diverges the model rollout.
+        x_approx = x_real.copy()  # xref[0].copy()
 
         rospy.loginfo(
             f"[AUDIT] Starting {total_steps}-step audit.  "
-            "After each step press Enter to continue or 'q'<Enter> to abort."
+            f"Pausing every {decision_interval} step(s). "
+            "Press Enter to continue or 'q'<Enter> to abort."
         )
 
         for i in range(total_steps):
@@ -255,30 +339,42 @@ class DynamicsAuditor(Base):
             approx_log.append(x_approx.copy())
 
             # 2. Policy on real state → compute command → send to hardware
-            u_real   = self._policy_u(x_real, xref[i], uref[i], control_scaler)
-            Jb_real  = self._jacobian(x_real)
-            target   = self.check_valid_joint_angle(
+            u_real = self._policy_u(x_real, xref[i], uref[i], control_scaler)
+
+            target = self.check_valid_joint_angle(
                 self.joint_pos + u_real * self.dt, terminate_on_invalid=False
             )
-            msg          = JointCommand()
-            msg.target   = target.tolist()
+            # Recover the effective control after joint-angle clipping so the
+            # model prediction uses the same u that was physically applied.
+            u_real_applied = (target - self.joint_pos) / self.dt
+
+            msg = JointCommand()
+            msg.target = target.tolist()
             msg.duration = self.duration
             self.joint_abs_pub.publish(msg)
 
-            # 3. Model prediction from the current REAL state (single-step test)
-            x_model_pred = model_step(x_real, u_real, Jb_real, self.dt)
+            # 3. Model prediction from the current REAL state (single-step test).
+            # Uses decimation sub-steps to match simulator's get_transition().
+            x_model_pred = model_step(x_real, u_real_applied, self.dyn, self.dt)
 
-            # 4. Approx closed-loop: policy queries x_approx, model propagates it
+            # 4. Approx closed-loop: policy queries x_approx, model propagates it.
+            # Apply the same joint-angle clipping the real robot experiences so
+            # the approx trajectory stays physically consistent.
             u_approx = self._policy_u(x_approx, xref[i], uref[i], control_scaler)
-            Jb_approx = self._jacobian(x_approx)
-            x_approx  = model_step(x_approx, u_approx, Jb_approx, self.dt)
+            approx_target = self.check_valid_joint_angle(
+                x_approx[5:] + u_approx * self.dt, terminate_on_invalid=False
+            )
+            u_approx_applied = (approx_target - x_approx[5:]) / self.dt
+            x_approx = model_step(x_approx, u_approx_applied, self.dyn, self.dt)
 
             # 5. Wait one control cycle so the robot reaches the target
             self.rate.sleep()
 
             # 6. Read real next state → one-step mismatch
-            x_real_next = np.concatenate([self.base_pos, self.base_attitude, self.joint_pos])
-            err = angle_diff(x_real_next, x_model_pred)   # (23,)
+            x_real_next = np.concatenate(
+                [self.base_pos, self.base_attitude, self.joint_pos]
+            )
+            err = angle_diff(x_real_next, x_model_pred)  # (23,)
             one_step_errs.append(err)
 
             # 7. Divergence between the two parallel trajectories
@@ -287,21 +383,26 @@ class DynamicsAuditor(Base):
             # 8. Per-step console summary
             self._print_step(i, err, traj_div)
 
-            # 9. Safety pause — operator decides whether to continue
-            try:
-                choice = input(
-                    "  >> [Enter] continue  |  [q] quit  |  [s] save & quit  > "
-                ).strip().lower()
-            except EOFError:
-                choice = ""
+            # 9. Safety pause every decision_interval steps
+            if (i + 1) % decision_interval == 0:
+                try:
+                    choice = (
+                        input(
+                            "  >> [Enter] continue  |  [q] quit  |  [s] save & quit  > "
+                        )
+                        .strip()
+                        .lower()
+                    )
+                except EOFError:
+                    choice = ""
 
-            if choice in ("q", "s"):
-                rospy.logwarn("[AUDIT] Operator aborted.")
-                break
+                if choice in ("q", "s"):
+                    rospy.logwarn("[AUDIT] Operator aborted.")
+                    break
 
         # ── Post-run ──────────────────────────────────────────────────────────
-        real_log      = np.array(real_log)
-        approx_log    = np.array(approx_log)
+        real_log = np.array(real_log)
+        approx_log = np.array(approx_log)
         one_step_errs = np.array(one_step_errs)
 
         self._save_log(real_log, approx_log, one_step_errs)
@@ -316,7 +417,7 @@ class DynamicsAuditor(Base):
         one_step_errs: np.ndarray,
     ):
         os.makedirs("hexapod_data", exist_ok=True)
-        ts   = int(time.time())
+        ts = int(time.time())
         path = f"hexapod_data/dynamics_audit_{ts}.npz"
         np.savez_compressed(
             path,
@@ -333,15 +434,17 @@ class DynamicsAuditor(Base):
         real_log: np.ndarray,
         approx_log: np.ndarray,
     ):
-        T    = len(one_step_errs)
-        mae  = np.mean(np.abs(one_step_errs), axis=0)
-        std  = np.std(one_step_errs,           axis=0)
-        maxe = np.max(np.abs(one_step_errs),   axis=0)
+        T = len(one_step_errs)
+        mae = np.mean(np.abs(one_step_errs), axis=0)
+        std = np.std(one_step_errs, axis=0)
+        maxe = np.max(np.abs(one_step_errs), axis=0)
 
-        div_series = np.array([
-            np.linalg.norm(angle_diff(real_log[t], approx_log[t]))
-            for t in range(min(T, len(approx_log)))
-        ])
+        div_series = np.array(
+            [
+                np.linalg.norm(angle_diff(real_log[t], approx_log[t]))
+                for t in range(min(T, len(approx_log)))
+            ]
+        )
 
         print("\n" + "═" * 70)
         print("  QUALITATIVE DYNAMICS MISMATCH REPORT")
@@ -356,7 +459,7 @@ class DynamicsAuditor(Base):
                 f"{mae[j]:9.5f}  {std[j]:9.5f}  {maxe[j]:9.5f}{marker}"
             )
 
-        base_mae  = mae[:5].mean()
+        base_mae = mae[:5].mean()
         joint_mae = mae[5:].mean()
 
         print()
@@ -364,19 +467,25 @@ class DynamicsAuditor(Base):
         print(f"  Joints    (dims 5–22) average MAE : {joint_mae:.5f}")
 
         if len(div_series) > 1:
-            peak_t  = int(np.argmax(div_series))
-            accel   = np.diff(div_series)
+            peak_t = int(np.argmax(div_series))
+            accel = np.diff(div_series)
             accel_t = int(np.argmax(accel))
-            print(f"\n  Approx-traj divergence peak   : step {peak_t} "
-                  f"(L2 = {div_series[peak_t]:.5f})")
-            print(f"  Fastest divergence growth     : step {accel_t}→{accel_t+1} "
-                  f"(Δ = {accel[accel_t]:.5f})")
+            print(
+                f"\n  Approx-traj divergence peak   : step {peak_t} "
+                f"(L2 = {div_series[peak_t]:.5f})"
+            )
+            print(
+                f"  Fastest divergence growth     : step {accel_t}→{accel_t+1} "
+                f"(Δ = {accel[accel_t]:.5f})"
+            )
 
         print()
         # Actionable interpretation
         ratio = base_mae / (joint_mae + 1e-9)
         if ratio > 5:
-            print("  [!] Base-pose error dominates.  The Jacobian network under-predicts")
+            print(
+                "  [!] Base-pose error dominates.  The Jacobian network under-predicts"
+            )
             print("      base translation/rotation.  Consider: more training data with")
             print("      aggressive manoeuvres, or adding base-velocity to the state.")
         elif ratio < 0.2:
@@ -406,13 +515,13 @@ class DynamicsAuditor(Base):
     ):
         ts = int(time.time())
         os.makedirs("hexapod_data", exist_ok=True)
-        T  = len(one_step_errs)
+        T = len(one_step_errs)
         T2 = len(real_log)
         t_ax = np.arange(T)
 
         # ── Fig 1: per-dim one-step error grid ────────────────────────────────
         ncols = 5
-        nrows = 5   # 5×5 = 25 ≥ 23
+        nrows = 5  # 5×5 = 25 ≥ 23
         fig1, axes = plt.subplots(nrows, ncols, figsize=(20, 16), sharex=True)
         axes = axes.flatten()
 
@@ -423,7 +532,7 @@ class DynamicsAuditor(Base):
             ax.set_title(STATE_LABELS[j], fontsize=9, pad=2)
             ax.tick_params(labelsize=6)
             # shade ±1 std band
-            mu  = one_step_errs[:, j].mean()
+            mu = one_step_errs[:, j].mean()
             sig = one_step_errs[:, j].std()
             ax.axhspan(mu - sig, mu + sig, color="#58a6ff", alpha=0.08)
         for j in range(X_DIM, len(axes)):
@@ -441,29 +550,36 @@ class DynamicsAuditor(Base):
         print(f"[AUDIT] Fig 1 → {out1}")
 
         # ── Fig 2: cumulative divergence ──────────────────────────────────────
-        div = np.array([
-            np.linalg.norm(angle_diff(real_log[t], approx_log[t]))
-            for t in range(T2)
-        ])
+        div = np.array(
+            [np.linalg.norm(angle_diff(real_log[t], approx_log[t])) for t in range(T2)]
+        )
         # component-wise breakdown: base vs joints
-        div_base  = np.array([
-            np.linalg.norm(angle_diff(real_log[t, :5], approx_log[t, :5]))
-            for t in range(T2)
-        ])
-        div_joint = np.array([
-            np.linalg.norm(real_log[t, 5:] - approx_log[t, 5:])
-            for t in range(T2)
-        ])
+        div_base = np.array(
+            [
+                np.linalg.norm(angle_diff(real_log[t, :5], approx_log[t, :5]))
+                for t in range(T2)
+            ]
+        )
+        div_joint = np.array(
+            [np.linalg.norm(real_log[t, 5:] - approx_log[t, 5:]) for t in range(T2)]
+        )
 
         fig2, (ax2a, ax2b) = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
-        ax2a.plot(np.arange(T2), div, color="#3fb950", linewidth=1.5,
-                  label="Total ‖x_real – x_approx‖₂")
+        ax2a.plot(
+            np.arange(T2),
+            div,
+            color="#3fb950",
+            linewidth=1.5,
+            label="Total ‖x_real – x_approx‖₂",
+        )
         ax2a.fill_between(np.arange(T2), 0, div, alpha=0.15, color="#3fb950")
         ax2a.set_ylabel("L2 divergence")
         ax2a.set_title("Cumulative Trajectory Divergence: Real vs Approx (closed-loop)")
         ax2a.legend()
 
-        ax2b.plot(np.arange(T2), div_base,  label="Base pose (dims 0–4)",  color="#f78166")
+        ax2b.plot(
+            np.arange(T2), div_base, label="Base pose (dims 0–4)", color="#f78166"
+        )
         ax2b.plot(np.arange(T2), div_joint, label="Joints (dims 5–22)", color="#d2a8ff")
         ax2b.set_xlabel("Time step")
         ax2b.set_ylabel("Component L2")
@@ -480,21 +596,59 @@ class DynamicsAuditor(Base):
         fig3, ax3 = plt.subplots(figsize=(9, 9))
         N = min(T2, len(xref))
         if xref is not None and N > 0:
-            ax3.plot(xref[:N, 0], xref[:N, 1],
-                     color="#8b949e", linewidth=1.2, linestyle="--",
-                     label="Reference")
-        ax3.plot(real_log[:, 0],   real_log[:, 1],
-                 color="#58a6ff", linewidth=1.8, label="Real robot")
-        ax3.plot(approx_log[:, 0], approx_log[:, 1],
-                 color="#f78166", linewidth=1.8, linestyle=":", label="Approx (model)")
+            ax3.plot(
+                xref[:N, 0],
+                xref[:N, 1],
+                color="#8b949e",
+                linewidth=1.2,
+                linestyle="--",
+                label="Reference",
+            )
+        ax3.plot(
+            real_log[:, 0],
+            real_log[:, 1],
+            color="#58a6ff",
+            linewidth=1.8,
+            label="Real robot",
+        )
+        ax3.plot(
+            approx_log[:, 0],
+            approx_log[:, 1],
+            color="#f78166",
+            linewidth=1.8,
+            linestyle=":",
+            label="Approx (model)",
+        )
 
         # mark start and end
-        ax3.scatter(*real_log[0, :2],    color="#58a6ff", s=100, zorder=6,
-                    edgecolors="white", linewidths=0.8, label="Start (real)")
-        ax3.scatter(*real_log[-1, :2],   color="#58a6ff", marker="D", s=100, zorder=6,
-                    edgecolors="white", linewidths=0.8, label="End (real)")
-        ax3.scatter(*approx_log[-1, :2], color="#f78166", marker="x", s=120, zorder=6,
-                    linewidths=2, label="End (approx)")
+        ax3.scatter(
+            *real_log[0, :2],
+            color="#58a6ff",
+            s=100,
+            zorder=6,
+            edgecolors="white",
+            linewidths=0.8,
+            label="Start (real)",
+        )
+        ax3.scatter(
+            *real_log[-1, :2],
+            color="#58a6ff",
+            marker="D",
+            s=100,
+            zorder=6,
+            edgecolors="white",
+            linewidths=0.8,
+            label="End (real)",
+        )
+        ax3.scatter(
+            *approx_log[-1, :2],
+            color="#f78166",
+            marker="x",
+            s=120,
+            zorder=6,
+            linewidths=2,
+            label="End (approx)",
+        )
 
         ax3.set_xlabel("X (m)")
         ax3.set_ylabel("Y (m)")
@@ -514,15 +668,31 @@ if __name__ == "__main__":
         description="Per-step dynamics audit: real robot vs Jacobian model.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--algo-name",      type=str,   default="ppo",
-                        help="Policy to load: ppo | carl | c3m")
-    parser.add_argument("--control-scaler", type=float, default=0.3,
-                        help="Scales the policy's Δu output. Must match env_config['u_scaler'].")
-    parser.add_argument("--duration",       type=float, default=30.0,
-                        help="Max audit duration in seconds.")
-    parser.add_argument("--traj-path",      type=str,   default=None,
-                        help="Optional path to a specific .npz trajectory. "
-                             "Defaults to models/test_traj.npz via Base.load_test_data().")
+    parser.add_argument(
+        "--algo-name", type=str, default="carl", help="Policy to load: ppo | carl | c3m"
+    )
+    parser.add_argument(
+        "--control-scaler",
+        type=float,
+        default=0.3,
+        help="Scales the policy's Δu output. Must match env_config['u_scaler'].",
+    )
+    parser.add_argument(
+        "--duration", type=float, default=30.0, help="Max audit duration in seconds."
+    )
+    parser.add_argument(
+        "--traj-path",
+        type=str,
+        default=None,
+        help="Optional path to a specific .npz trajectory. "
+        "Defaults to models/test_traj.npz via Base.load_test_data().",
+    )
+    parser.add_argument(
+        "--decision-interval",
+        type=int,
+        default=300,
+        help="Pause for operator input every N steps (default: 1 = pause after every step).",
+    )
     args = parser.parse_args()
 
     try:
@@ -530,10 +700,11 @@ if __name__ == "__main__":
             algo_name=args.algo_name,
             traj_path=args.traj_path,
         )
-        auditor.initialize_robot_for_replay()
+        # auditor.initialize_robot_for_replay()
         auditor.run_audit(
             control_scaler=args.control_scaler,
             duration=args.duration,
+            decision_interval=args.decision_interval,
         )
         auditor.stop_robot()
     except rospy.ROSInterruptException:
