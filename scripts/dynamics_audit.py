@@ -168,6 +168,7 @@ class DynamicsAuditor(Base):
         rospy.init_node("dynamics_auditor", anonymous=True)
         super().__init__(config=_ROS_CFG)
 
+        self.algo_name = algo_name
         self.policy = self._load_policy(algo_name)
         self.dyn = HexapodDynamics()
         self.dyn.eval()
@@ -227,7 +228,9 @@ class DynamicsAuditor(Base):
         )
 
         if n < 300:
-            rospy.logwarn(f"[AUDIT] Only {n} reference steps available from alignment point.")
+            rospy.logwarn(
+                f"[AUDIT] Only {n} reference steps available from alignment point."
+            )
 
         assert xref.shape[1] == X_DIM, f"Unexpected xref shape {xref.shape}"
         return xref, uref
@@ -246,7 +249,9 @@ class DynamicsAuditor(Base):
         # the C3M tanh and fires maximum joint commands.
         xref_aligned = xref_t.copy()
         for idx in ATTITUDE_IDX:
-            xref_aligned[idx] += np.round((x[idx] - xref_t[idx]) / (2 * np.pi)) * 2 * np.pi
+            xref_aligned[idx] += (
+                np.round((x[idx] - xref_t[idx]) / (2 * np.pi)) * 2 * np.pi
+            )
 
         obs = torch.from_numpy(
             np.concatenate([x, xref_aligned, uref_t]).astype(np.float32)
@@ -309,6 +314,17 @@ class DynamicsAuditor(Base):
             f"yaw={np.degrees(self.base_attitude[2]):.1f}°"
         )
 
+        # One directory per run holds the npz log + all figures, so a single
+        # timestamp is computed up-front (don't let _save_log / _plot_all each
+        # call time.time() — they would land in different folders).
+        run_dir = os.path.join(
+            "script_log",
+            "audit_log",
+            f"{self.algo_name}_{time.strftime('%Y%m%d_%H%M%S')}",
+        )
+        os.makedirs(run_dir, exist_ok=True)
+        rospy.loginfo(f"[AUDIT] Run outputs → {run_dir}/")
+
         xref, uref = self._load_ref_traj()
         total_steps = min(len(xref), int(duration / self.dt))
 
@@ -341,6 +357,26 @@ class DynamicsAuditor(Base):
         for i in range(total_steps):
             if rospy.is_shutdown():
                 break
+
+            # 0. Safety pause every decision_interval steps BEFORE issuing
+            #    the next command, so the operator can abort before any new
+            #    motion. The previous step's error/divergence summary printed
+            #    at the end of the prior iteration is what they're reviewing.
+            if i % decision_interval == 0:
+                try:
+                    choice = (
+                        input(
+                            "  >> [Enter] continue  |  [q] quit  |  [s] save & quit  > "
+                        )
+                        .strip()
+                        .lower()
+                    )
+                except EOFError:
+                    choice = ""
+
+                if choice in ("q", "s"):
+                    rospy.logwarn("[AUDIT] Operator aborted.")
+                    break
 
             # 1. Read the real robot state
             x_real = np.concatenate([self.base_pos, self.base_attitude, self.joint_pos])
@@ -383,6 +419,7 @@ class DynamicsAuditor(Base):
             x_real_next = np.concatenate(
                 [self.base_pos, self.base_attitude, self.joint_pos]
             )
+            x_real_next = self.check_valid_base(x_real_next, terminate_on_invalid=True)
             err = angle_diff(x_real_next, x_model_pred)  # (23,)
             one_step_errs.append(err)
 
@@ -392,31 +429,14 @@ class DynamicsAuditor(Base):
             # 8. Per-step console summary
             self._print_step(i, err, traj_div)
 
-            # 9. Safety pause every decision_interval steps
-            if (i + 1) % decision_interval == 0:
-                try:
-                    choice = (
-                        input(
-                            "  >> [Enter] continue  |  [q] quit  |  [s] save & quit  > "
-                        )
-                        .strip()
-                        .lower()
-                    )
-                except EOFError:
-                    choice = ""
-
-                if choice in ("q", "s"):
-                    rospy.logwarn("[AUDIT] Operator aborted.")
-                    break
-
         # ── Post-run ──────────────────────────────────────────────────────────
         real_log = np.array(real_log)
         approx_log = np.array(approx_log)
         one_step_errs = np.array(one_step_errs)
 
-        self._save_log(real_log, approx_log, one_step_errs)
+        self._save_log(real_log, approx_log, one_step_errs, run_dir)
         self._qualitative_report(one_step_errs, real_log, approx_log)
-        self._plot_all(real_log, approx_log, one_step_errs, xref)
+        self._plot_all(real_log, approx_log, one_step_errs, xref, run_dir)
 
     # ── save log ──────────────────────────────────────────────────────────────
     @staticmethod
@@ -424,10 +444,9 @@ class DynamicsAuditor(Base):
         real_log: np.ndarray,
         approx_log: np.ndarray,
         one_step_errs: np.ndarray,
+        run_dir: str,
     ):
-        os.makedirs("hexapod_data", exist_ok=True)
-        ts = int(time.time())
-        path = f"hexapod_data/dynamics_audit_{ts}.npz"
+        path = os.path.join(run_dir, "dynamics_audit.npz")
         np.savez_compressed(
             path,
             x_real=real_log,
@@ -521,9 +540,8 @@ class DynamicsAuditor(Base):
         approx_log: np.ndarray,
         one_step_errs: np.ndarray,
         xref: np.ndarray,
+        run_dir: str,
     ):
-        ts = int(time.time())
-        os.makedirs("hexapod_data", exist_ok=True)
         T = len(one_step_errs)
         T2 = len(real_log)
         t_ax = np.arange(T)
@@ -553,7 +571,7 @@ class DynamicsAuditor(Base):
             fontsize=12,
         )
         fig1.tight_layout(rect=[0, 0, 1, 0.95])
-        out1 = f"hexapod_data/audit_onestep_{ts}.png"
+        out1 = os.path.join(run_dir, "audit_onestep.png")
         fig1.savefig(out1, dpi=150)
         plt.close(fig1)
         print(f"[AUDIT] Fig 1 → {out1}")
@@ -596,7 +614,7 @@ class DynamicsAuditor(Base):
         ax2b.legend()
 
         fig2.tight_layout()
-        out2 = f"hexapod_data/audit_divergence_{ts}.png"
+        out2 = os.path.join(run_dir, "audit_divergence.png")
         fig2.savefig(out2, dpi=150)
         plt.close(fig2)
         print(f"[AUDIT] Fig 2 → {out2}")
@@ -665,7 +683,7 @@ class DynamicsAuditor(Base):
         ax3.legend(loc="best")
         ax3.set_aspect("equal", adjustable="datalim")
         fig3.tight_layout()
-        out3 = f"hexapod_data/audit_trajectory_{ts}.png"
+        out3 = os.path.join(run_dir, "audit_trajectory.png")
         fig3.savefig(out3, dpi=150)
         plt.close(fig3)
         print(f"[AUDIT] Fig 3 → {out3}")
@@ -683,7 +701,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--control-scaler",
         type=float,
-        default=0.3,
+        default=1.0,
         help="Scales the policy's Δu output. Must match env_config['u_scaler'].",
     )
     parser.add_argument(
@@ -699,11 +717,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--decision-interval",
         type=int,
-        default=300,
+        default=30,
         help="Pause for operator input every N steps (default: 1 = pause after every step).",
     )
     args = parser.parse_args()
 
+    auditor = None
     try:
         auditor = DynamicsAuditor(
             algo_name=args.algo_name,
@@ -715,6 +734,12 @@ if __name__ == "__main__":
             duration=args.duration,
             decision_interval=args.decision_interval,
         )
-        auditor.stop_robot()
     except rospy.ROSInterruptException:
         pass
+    except ValueError as e:
+        # check_valid_base raises this on OOD base state. Falling through to
+        # stop_robot() in finally is the whole point of the OOD check.
+        rospy.logerr(f"[AUDIT] Aborting on OOD: {e}")
+    finally:
+        if auditor is not None:
+            auditor.stop_robot()

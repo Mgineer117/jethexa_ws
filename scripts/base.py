@@ -31,7 +31,7 @@ from jethexa_controller_interfaces.msg import JointCommand
 _D = 10 / 11  # shrink factor for bounds that move toward zero
 _U = 11 / 10  # grow   factor for bounds that move away from zero
 
-JOINT_MIN = np.array(
+X_MIN = np.array(
     [
         -5.00,  # Base X  (facility, fixed)
         -2.00,  # Base Y  (facility, fixed)
@@ -59,7 +59,7 @@ JOINT_MIN = np.array(
     ]
 ).reshape(-1, 1)
 
-JOINT_MAX = np.array(
+X_MAX = np.array(
     [
         0.50,  # Base X  (facility, fixed)
         2.50,  # Base Y  (facility, fixed)
@@ -297,9 +297,9 @@ class Base:
         # Copy so we never mutate a sensor buffer the caller may still hold.
         joint_angles = np.array(joint_angles, copy=True)
 
-        # JOINT_MIN/MAX are 23-dim (base+attitude+joints); slice the joint block.
-        joint_lo = JOINT_MIN.flatten()[5:23]
-        joint_hi = JOINT_MAX.flatten()[5:23]
+        # X_MIN/X_MAX are 23-dim (base+attitude+joints); slice the joint block.
+        joint_lo = X_MIN.flatten()[5:23]
+        joint_hi = X_MAX.flatten()[5:23]
         invalid_angles = np.logical_or(joint_angles < joint_lo, joint_angles > joint_hi)
         if np.any(invalid_angles):
             if terminate_on_invalid:
@@ -313,6 +313,36 @@ class Base:
                 "[Warning]: Out-of-bounds joint angles have been clipped to the nearest valid values."
             )
         return joint_angles
+
+    def check_valid_base(
+        self, x: np.ndarray, terminate_on_invalid: bool = False
+    ) -> np.ndarray:
+        """Check position/attitude are in range of X_MIN/X_MAX. terminate on invalid if any value is out of bounds, otherwise clip to nearest valid value."""
+        if x.shape != (23,):
+            rospy.logerr(
+                f"[Error]: Invalid base state shape: expected (23,), got {x.shape}"
+            )
+            raise ValueError("[Error]: Base state must be a 1D array of length 23.")
+
+        # Copy so we never mutate a sensor buffer the caller may still hold.
+        x = np.array(x, copy=True)
+
+        # X_MIN/X_MAX are 23-dim (base+attitude+joints); slice the base block.
+        base_lo = X_MIN.flatten()[0:5]
+        base_hi = X_MAX.flatten()[0:5]
+        invalid_base = np.logical_or(x < base_lo, x > base_hi)
+        if np.any(invalid_base):
+            if terminate_on_invalid:
+                raise ValueError("[Error]: One or more base states are out of bounds.")
+            x[invalid_base] = np.clip(
+                x[invalid_base],
+                base_lo[invalid_base],
+                base_hi[invalid_base],
+            )
+            rospy.logwarn(
+                "[Warning]: Out-of-bounds base states have been clipped to the nearest valid values."
+            )
+        return x
 
     # ------------------------------------------------------------------
     # Control helpers
