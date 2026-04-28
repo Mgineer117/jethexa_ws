@@ -328,14 +328,14 @@ class Base:
         x = np.array(x, copy=True)
 
         # X_MIN/X_MAX are 23-dim (base+attitude+joints); slice the base block.
-        base_lo = X_MIN.flatten()[0:5]
-        base_hi = X_MAX.flatten()[0:5]
-        invalid_base = np.logical_or(x < base_lo, x > base_hi)
+        base_lo = X_MIN.flatten()[:5]
+        base_hi = X_MAX.flatten()[:5]
+        invalid_base = np.logical_or(x[:5] < base_lo, x[:5] > base_hi)
         if np.any(invalid_base):
             if terminate_on_invalid:
                 raise ValueError("[Error]: One or more base states are out of bounds.")
-            x[invalid_base] = np.clip(
-                x[invalid_base],
+            x[:5][invalid_base] = np.clip(
+                x[:5][invalid_base],
                 base_lo[invalid_base],
                 base_hi[invalid_base],
             )

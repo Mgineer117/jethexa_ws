@@ -42,8 +42,8 @@ from std_msgs.msg import String
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 from base import HZ
+
 from jethexa_controller_interfaces.msg import JointCommand
 
 
@@ -163,8 +163,8 @@ class JetHexaDataCollector:
         self.save_data(mode)
 
     def collect_sinusoidal_turning(self, duration=30.0):
-        s_vx, s_vy = np.random.uniform(0.02, 0.05), 0.0
-        s_amp, s_freq = np.random.uniform(0.01, 0.05), 1 / 30
+        s_vx, s_vy = np.random.uniform(0.02, 0.04), 0.0
+        s_amp, s_freq = np.random.uniform(0.01, 0.04), 1 / 30
 
         def cmd_logic(t):
             s_wz = s_amp * np.sin(2 * np.pi * s_freq * t)

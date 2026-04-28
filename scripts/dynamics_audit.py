@@ -25,7 +25,7 @@ Three output figures
 
 Usage
 ─────
-  python dynamics_audit.py --algo ppo --control-scaler 0.1 --duration 30
+  python dynamics_audit.py --algo ppo --control-scaler 0.3 --duration 30
   python dynamics_audit.py --algo carl --traj-path hexapod_data/training/foo.npz
 """
 
@@ -52,8 +52,8 @@ import numpy as np
 import rospy
 import torch
 import torch.nn as nn
-
 from base import INIT_JOINT_POS, Base
+
 from jethexa_controller_interfaces.msg import JointCommand
 from models.policy_networks import CLActor
 
@@ -209,28 +209,14 @@ class DynamicsAuditor(Base):
         if xref_full.shape[1] == 24:  # strip p_z if present
             xref_full = np.delete(xref_full, 2, axis=1)
 
-        # Align reference to the robot's current XY position so the audit
-        # starts within the training perturbation bound (±0.30 m).
-        # Without this, a fixed xref[-300:] can start 0.3-0.5 m away,
-        # immediately pushing the C3M controller out of its contraction region.
-        robot_xy = np.array([self.base_pos[0], self.base_pos[1]])
-        dists = np.linalg.norm(xref_full[:, :2] - robot_xy, axis=1)
-        start_idx = int(np.argmin(dists))
-        end_idx = min(start_idx + 300, len(xref_full))
-        n = end_idx - start_idx
-
-        xref = xref_full[start_idx:end_idx]
-        uref = uref_full[start_idx:end_idx]
-
-        rospy.loginfo(
-            f"[AUDIT] Ref aligned: closest point = index {start_idx} "
-            f"(dist={dists[start_idx]:.3f} m), using {n} steps."
-        )
-
+        n = len(xref_full)
         if n < 300:
             rospy.logwarn(
                 f"[AUDIT] Only {n} reference steps available from alignment point."
             )
+
+        xref = xref_full[-300:]
+        uref = uref_full[-300:]
 
         assert xref.shape[1] == X_DIM, f"Unexpected xref shape {xref.shape}"
         return xref, uref
@@ -419,7 +405,7 @@ class DynamicsAuditor(Base):
             x_real_next = np.concatenate(
                 [self.base_pos, self.base_attitude, self.joint_pos]
             )
-            x_real_next = self.check_valid_base(x_real_next, terminate_on_invalid=True)
+            x_real_next = self.check_valid_base(x_real_next, terminate_on_invalid=False)
             err = angle_diff(x_real_next, x_model_pred)  # (23,)
             one_step_errs.append(err)
 
@@ -434,9 +420,25 @@ class DynamicsAuditor(Base):
         approx_log = np.array(approx_log)
         one_step_errs = np.array(one_step_errs)
 
+        # ── m²AUC summary (terminal) ──────────────────────────────────────────
+        L_max, L = total_steps, len(real_log)
+        N_ref = min(L, len(xref))
+        scale = L_max / max(L, 1)
+        m2auc_real = scale**2 * sum(
+            np.linalg.norm(angle_diff(real_log[k], xref[k])) for k in range(N_ref)
+        )
+        m2auc_approx = scale**2 * sum(
+            np.linalg.norm(angle_diff(approx_log[k], xref[k])) for k in range(N_ref)
+        )
+        print(f"\n{'═'*70}")
+        print(f"  m²AUC  (L_max={L_max}, L={L}, scale={(scale):.3f})")
+        print(f"    Real   trajectory: {m2auc_real:.4f}")
+        print(f"    Approx trajectory: {m2auc_approx:.4f}")
+        print(f"{'═'*70}")
+
         self._save_log(real_log, approx_log, one_step_errs, run_dir)
         self._qualitative_report(one_step_errs, real_log, approx_log)
-        self._plot_all(real_log, approx_log, one_step_errs, xref, run_dir)
+        self._plot_all(real_log, approx_log, one_step_errs, xref, run_dir, total_steps)
 
     # ── save log ──────────────────────────────────────────────────────────────
     @staticmethod
@@ -541,10 +543,31 @@ class DynamicsAuditor(Base):
         one_step_errs: np.ndarray,
         xref: np.ndarray,
         run_dir: str,
+        total_steps: int,
     ):
         T = len(one_step_errs)
         T2 = len(real_log)
         t_ax = np.arange(T)
+
+        # ── m²AUC ─────────────────────────────────────────────────────────────
+        # m²AUC = (L_max/L)² · Σ‖e(tₖ)‖₂
+        # Penalises early termination: if L << L_max the factor amplifies the sum.
+        L_max = total_steps
+        N_ref = min(T2, len(xref))
+
+        def _m2auc(traj: np.ndarray) -> float:
+            L = len(traj)
+            errors = np.array(
+                [
+                    np.linalg.norm(angle_diff(traj[k], xref[k]))
+                    for k in range(min(L, N_ref))
+                ]
+            )
+            scale = L_max / max(L, 1)
+            return float(scale**2 * errors.sum())
+
+        m2auc_real = _m2auc(real_log)
+        m2auc_approx = _m2auc(approx_log)
 
         # ── Fig 1: per-dim one-step error grid ────────────────────────────────
         ncols = 5
@@ -682,6 +705,29 @@ class DynamicsAuditor(Base):
         ax3.set_title("2-D XY Trajectory: Real vs Approx (model closed-loop)")
         ax3.legend(loc="best")
         ax3.set_aspect("equal", adjustable="datalim")
+
+        # Annotate m²AUC in a text box (lower-right corner of the axes)
+        m2auc_text = (
+            f"m²AUC\n" f"  Real:   {m2auc_real:.4f}\n" f"  Approx: {m2auc_approx:.4f}"
+        )
+        ax3.text(
+            0.98,
+            0.02,
+            m2auc_text,
+            transform=ax3.transAxes,
+            fontsize=9,
+            family="monospace",
+            verticalalignment="bottom",
+            horizontalalignment="right",
+            bbox=dict(
+                boxstyle="round,pad=0.4",
+                facecolor="#161b22",
+                edgecolor="#30363d",
+                alpha=0.85,
+            ),
+            color="white",
+        )
+
         fig3.tight_layout()
         out3 = os.path.join(run_dir, "audit_trajectory.png")
         fig3.savefig(out3, dpi=150)
@@ -696,7 +742,7 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--algo-name", type=str, default="carl", help="Policy to load: ppo | carl | c3m"
+        "--algo-name", type=str, default="c3m", help="Policy to load: ppo | carl | c3m"
     )
     parser.add_argument(
         "--control-scaler",
@@ -705,7 +751,7 @@ if __name__ == "__main__":
         help="Scales the policy's Δu output. Must match env_config['u_scaler'].",
     )
     parser.add_argument(
-        "--duration", type=float, default=30.0, help="Max audit duration in seconds."
+        "--duration", type=float, default=31.0, help="Max audit duration in seconds."
     )
     parser.add_argument(
         "--traj-path",
@@ -717,7 +763,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--decision-interval",
         type=int,
-        default=30,
+        default=500,
         help="Pause for operator input every N steps (default: 1 = pause after every step).",
     )
     args = parser.parse_args()
